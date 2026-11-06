@@ -152,11 +152,6 @@ section.block{display:flex;flex-direction:column;gap:10px}
 .brow-top .row-main{flex:1}
 .brow-nums{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .brow-nums b{color:var(--fg);font-weight:600}
-.cards-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
-.minicard{flex:0 0 auto;width:150px;border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface);padding:12px;display:flex;flex-direction:column;gap:6px;text-align:left}
-.minicard .ct{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;min-width:0}
-.minicard .ct span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.minicard .amt{font-family:var(--f-display);font-weight:700;font-size:20px}
 .cardglyph{width:26px;height:18px;border-radius:4px;background:var(--c);flex:none;position:relative}
 .cardglyph::after{content:"";position:absolute;left:4px;top:5px;width:7px;height:5px;border-radius:1px;background:var(--surface);opacity:.75}
 .cardtile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;display:flex;flex-direction:column;gap:12px}
@@ -198,7 +193,6 @@ section.block{display:flex;flex-direction:column;gap:10px}
 .verdict strong{font-family:var(--f-display);font-size:18px}
 .thumbs{display:flex;gap:8px;overflow-x:auto}
 .thumbs img{height:110px;width:auto;border-radius:10px;border:1px solid var(--line);flex:none}
-.receipt-img{max-height:240px;width:auto;border-radius:10px;border:1px solid var(--line)}
 .tablewrap{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -339,7 +333,7 @@ details.more[open]>summary::before{content:'− '}
 <script>
 (function(){
 'use strict';
-const APP_VERSION = '2026.11.06-12';
+const APP_VERSION = '2026.11.06-13';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -389,7 +383,6 @@ const ICON = {
   camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   left:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
-  target:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/></svg>',
   down:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
   right:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
   bank:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/></svg>',
@@ -832,7 +825,6 @@ function badge(cat){
   const ic = CAT_ICON[cat.id] || (/^lohn-/.test(cat.id) ? CAT_ICON.lohn : null);
   return '<span class="badge" style="--c:var(--c' + (cat.color % 20) + ')" aria-hidden="true">' + (ic ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ic + '</svg>' : esc((cat.name || '?').trim().charAt(0).toUpperCase())) + '</span>';
 }
-const cardTag = c => c ? esc(c.name) + (c.last4 ? ' ' + esc(c.last4) : '') : '';
 const TRANSFER_CAT = {id:'__transfer', name:'Umbuchung', color:7, kind:'transfer'};
 CAT_ICON.__transfer = '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>';
 function transferRow(e, withDate){
@@ -1111,7 +1103,7 @@ function openGoal(id){
     });
 }
 function viewBudgets(){
-  const k = S.month, list = entriesIn(k), spent = spentByCat(list), pace = paceOf(k), tb = totalBudget(), s = sums(list);
+  const k = S.month, list = entriesIn(k), spent = spentByCat(list), pace = paceOf(k), tb = totalBudget();
   let h = monthBar(monthLabel(k), 'month') + '<div style="display:flex;flex-direction:column;gap:18px">';
   const bs = budgetSpent(list), st = tb ? budgetState(bs, tb, pace) : null;
   h += '<section class="hero"><div class="verdict"><div><div class="eyebrow">' + (cats().some(c => c.saving) ? 'Budget Ausgaben' : 'Gesamtbudget') + '</div><div class="big">' + (tb ? money0(tb) : '—') + '</div></div>' + (st ? '<span class="chip ' + st + '">' + STATE_TXT[st] + '</span>' : '') + '</div>' + '';
@@ -1892,7 +1884,6 @@ async function onReceiptFiles(files){
 /* ---------- Apple-Pay-Inbox ---------- */
 const INBOX_NAME = 'Kassabuch-Inbox.txt';
 function inboxGuide(){
-  const url = location.origin + location.pathname;
   openSheet('Apple Pay einrichten',
     '<p class="note" style="margin:0">Einmalig, ca. 5 Minuten. Danach schreibt dein iPhone jede Apple-Pay-Zahlung automatisch als Zeile in eine Datei. Die Daten bleiben in deinem iCloud Drive.</p>' +
     '<section class="panel"><h3>1. Inbox-Datei anlegen</h3><p class="note" style="margin:0">Tippe auf den Knopf, dann „In Dateien sichern“ → iCloud Drive → Ordner <b>Shortcuts</b> → Sichern.</p><div class="btnrow"><button class="btn small primary" data-act="inbox-file">Datei ' + INBOX_NAME + ' anlegen</button></div></section>' +
