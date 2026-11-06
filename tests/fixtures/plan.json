@@ -1,0 +1,20 @@
+{
+  "app": "Kassabuch",
+  "kind": "plan",
+  "title": "Testplan (fiktiv)",
+  "plannedIncome": 3000,
+  "groups": ["Fixe Kosten", "Lebenshaltung", "Variable Kosten", "Sparen & Investieren", "Aus Sonderzahlung"],
+  "categories": [
+    {"id": "wohnen", "name": "Wohnen", "kind": "expense", "group": "Fixe Kosten", "budget": 900},
+    {"id": "abos", "name": "Abos", "kind": "expense", "group": "Fixe Kosten", "budget": 50},
+    {"id": "lebensmittel", "name": "Lebensmittel", "kind": "expense", "group": "Lebenshaltung", "budget": 500},
+    {"id": "mobilitaet", "name": "Tanken", "kind": "expense", "group": "Lebenshaltung", "budget": 100},
+    {"id": "freizeit", "name": "Freizeit", "kind": "expense", "group": "Variable Kosten", "budget": 200},
+    {"id": "sonstiges", "name": "Allgemein", "kind": "expense", "group": "Variable Kosten", "budget": 50},
+    {"id": "ruecklage", "name": "Rücklage", "kind": "expense", "group": "Sparen & Investieren", "budget": 500, "saving": true},
+    {"id": "reisen", "name": "Reisen", "kind": "expense", "group": "Aus Sonderzahlung", "yearBudget": 2000},
+    {"id": "gehalt", "name": "Gehalt", "kind": "income"},
+    {"id": "einnahmen", "name": "Sonstige Einnahmen", "kind": "income"}
+  ],
+  "remap": {"restaurant": "freizeit"}
+}

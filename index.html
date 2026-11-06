@@ -333,7 +333,7 @@ details.more[open]>summary::before{content:'− '}
 <script>
 (function(){
 'use strict';
-const APP_VERSION = '2026.11.06-13';
+const APP_VERSION = '2026.11.06-14';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -2246,6 +2246,7 @@ function openSettings(){
     lookPanel() +
     '<section class="panel"><h3>Apple Pay</h3><p class="note" style="margin:0">Zahlungen mit Apple Pay landen per Kurzbefehl in einer Datei in iCloud Drive. Hier importierst du sie gesammelt.</p><div class="btnrow"><button class="btn small primary" data-act="inbox-pick">Inbox importieren</button><button class="btn small" data-act="inbox-guide">Einrichtung</button></div></section>' +
     '<section class="panel"><h3>Daten</h3><p class="note" style="margin:0">Alles liegt nur auf diesem iPhone, ohne Konto und ohne Server. ' + (SET.lastBackup ? 'Letztes Backup: ' + esc(DAYL.format(parseISO(SET.lastBackup.slice(0, 10)))) + '.' : 'Noch kein Backup.') + '</p>' +
+    '<label class="note" style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="s-photos"' + (SET.backupPhotos === false ? '' : ' checked') + '> Belegfotos mitsichern <span id="s-photos-size"></span></label>' +
     '<div class="btnrow"><button class="btn small primary" data-act="backup">Backup sichern</button><button class="btn small" id="s-restore">Backup oder Plan laden</button></div>' +
     '<div class="btnrow"><button class="btn small" id="s-import">CSV importieren</button><button class="btn small" id="s-csv">Export CSV</button><button class="btn small" id="s-clean">Aufräumen</button></div></section>' +
     '<section class="panel"><h3>Ausgaben-Kategorien</h3>' + catRows('expense') + '<h3 style="margin-top:6px">Einnahmen-Kategorien</h3>' + catRows('income') +
@@ -2281,6 +2282,7 @@ function openSettings(){
       $('#s-restore', root).onclick = () => { const i = $('#jsonInput'); i.value = ''; i.click(); };
       $('#s-csv', root).onclick = () => exportData('csv');
       $('#s-clean', root).onclick = () => openCleanup();
+      const ph = $('#s-photos', root); if (ph) { ph.onchange = () => { SET.backupPhotos = ph.checked; saveSettings(); }; blobStats().then(b => { const z = $('#s-photos-size', root); if (z && b.n) { const mb = b.bytes / 1048576 * 1.37; z.textContent = '(' + b.n + (b.n === 1 ? ' Foto' : ' Fotos') + ', ca. ' + (mb < 0.1 ? '< 0,1' : mb.toFixed(1).replace('.', ',')) + ' MB)'; } }); }
       $('#s-upd', root).onclick = async () => { lastCheck = 0; await checkUpdate(); if (S.updateReady) { closeSheet(); toast('Update ' + S.updateReady + ' bereit'); } else toast('Du hast die neueste Version.'); };
       $('#s-wipe', root).onclick = () => {
         $('#s-wipe-c', root).innerHTML = '<div class="confirm"><strong>Wirklich alles löschen?</strong><span class="note">Das lässt sich nicht rückgängig machen. Mach vorher ein Backup.</span><div class="btnrow"><button type="button" class="btn danger small" id="s-wipe-yes">Ja, alles löschen</button><button type="button" class="btn small" id="s-wipe-no">Abbrechen</button></div></div>';
@@ -2303,11 +2305,22 @@ async function deliverFile(filename, data, mime){
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
   return true;
 }
-async function exportData(kind){
+/* Belegfotos fürs Backup: Blob <-> data-URL (ohne fetch, wegen CSP) */
+async function blobStats(){
+  const ids = [...new Set(allEntries().flatMap(e => (e.receipts || []).map(r => r.blobId)).filter(Boolean))];
+  let bytes = 0, n = 0;
+  for (const id of ids) { const b = await tx('blobs', 'readonly', st => st.get(id)); if (b) { n++; bytes += b.size || 0; } }
+  return {n, bytes, ids};
+}
+const blobToData = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+function dataToBlob(u){ const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(u || ''); if (!m) return null; const raw = m[2] ? atob(m[3]) : decodeURIComponent(m[3]); const a = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i); return new Blob([a], {type:m[1] || 'application/octet-stream'}); }
+async function exportData(kind, opt){
   const list = allEntries().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const stamp = today();
   if (kind === 'json') {
-    const ok = await deliverFile('kassabuch-backup-' + stamp + '.json', JSON.stringify({app:'Kassabuch', version:1, exportedAt:new Date().toISOString(), profile:S.profile, entries:list}, null, 2), 'application/json');
+    const out = {app:'Kassabuch', version:2, exportedAt:new Date().toISOString(), profile:S.profile, entries:list};
+    if (opt && opt.photos) { const st = await blobStats(); out.blobs = {}; for (const id of st.ids) { const b = await tx('blobs', 'readonly', x => x.get(id)); if (b) out.blobs[id] = await blobToData(b); } }
+    const ok = await deliverFile('kassabuch-backup-' + stamp + '.json', JSON.stringify(out), 'application/json');
     if (ok) { SET.lastBackup = new Date().toISOString(); await saveSettings(); render(); toast('Backup erstellt. In „Dateien“ oder iCloud Drive sichern.'); }
     return;
   }
@@ -2345,17 +2358,25 @@ async function onJsonFile(file){
   if (d && d.app === 'Kassabuch' && d.kind === 'plan' && Array.isArray(d.categories)) { openPlan(d, file.name); return; }
   if (!d || d.app !== 'Kassabuch' || !Array.isArray(d.entries) || !d.profile) { toast('Datei ist kein Kassabuch-Backup.'); return; }
   const incoming = d.entries.filter(e => e && e.id && validISO(e.date) && typeof e.amount === 'number');
-  const fresh = incoming.filter(e => !S.entries.has(e.id));
-  openSheet('Backup laden', '<p class="note" style="margin:0">' + esc(file.name) + '<br>' + incoming.length + ' Einträge, davon ' + fresh.length + ' neu. Karten, Kategorien und Budgets werden ergänzt, Vorhandenes bleibt.</p><p class="note" style="margin:0">Belegfotos sind nicht Teil des Backups.</p><button class="btn primary" id="r-go"' + (fresh.length || !S.entries.size ? '' : ' disabled') + '>Zusammenführen</button>', root => {
+  const fresh = incoming.filter(e => !S.entries.has(e.id)), blobs = d.blobs && typeof d.blobs === 'object' ? d.blobs : null;
+  const emptyHere = !allEntries().some(e => !e.example) && !S.profile.cards.some(c => !c.example);
+  openSheet('Backup laden', '<p class="note" style="margin:0">' + esc(file.name) + '<br>' + incoming.length + ' Einträge, davon ' + fresh.length + ' neu' + (blobs ? ', ' + Object.keys(blobs).length + ' Belegfotos' : ', ohne Belegfotos') + '. ' + (emptyHere ? 'Dieses Gerät ist leer: alle Einstellungen werden übernommen.' : 'Karten, Kategorien, Budgets, Daueraufträge und Ziele werden ergänzt, Vorhandenes bleibt.') + '</p>' + (blobs ? '' : '<p class="note" style="margin:0">Dieses Backup enthält keine Belegfotos. Buchungen und Artikel bleiben vollständig.</p>') + '<button class="btn primary" id="r-go"' + (fresh.length || !S.entries.size ? '' : ' disabled') + '>Zusammenführen</button>', root => {
     $('#r-go', root).onclick = async () => {
-      const p = clean(S.profile), q = normalizeProfile(d.profile);
-      for (const c of q.categories) if (!p.categories.some(x => x.id === c.id)) p.categories.push(c);
-      for (const c of q.cards) if (!p.cards.some(x => x.id === c.id)) p.cards.push(c);
-      for (const [k, v] of Object.entries(q.budgets)) if (!p.budgets[k]) p.budgets[k] = v;
-      if (!p.totalBudget && q.totalBudget) p.totalBudget = q.totalBudget;
+      const q = normalizeProfile(d.profile); let p;
+      if (emptyHere) p = q;
+      else {
+        p = clean(S.profile);
+        const addById = (k) => { p[k] = p[k] || []; for (const x of (q[k] || [])) if (!p[k].some(y => y.id === x.id)) p[k].push(x); };
+        addById('categories'); addById('cards'); addById('recurring'); addById('goals');
+        for (const k of ['budgets', 'yearBudgets', 'bankMap', 'ibanMap', 'walletMap', 'merchantAlias']) { p[k] = p[k] || {}; for (const [a, v] of Object.entries(q[k] || {})) if (p[k][a] == null) p[k][a] = v; }
+        p.ignoredImports = [...new Set((p.ignoredImports || []).concat(q.ignoredImports || []))];
+        for (const k of ['totalBudget', 'plannedIncome', 'planNote']) if (!p[k] && q[k]) p[k] = q[k];
+        if (!(p.groups || []).length && (q.groups || []).length) p.groups = q.groups;
+      }
       await saveProfile(p);
+      if (blobs) { const need = new Set(incoming.flatMap(e => (e.receipts || []).map(r => r.blobId))); await tx('blobs', 'readwrite', st => { for (const [id, u] of Object.entries(blobs)) if (need.has(id)) { const b = dataToBlob(u); if (b) st.put(b, id); } }); }
       await putEntries(fresh.map(e => { const c = clean(e); if (c.receipts) c.receipts = c.receipts.filter(r => r.blobId); return c; }));
-      closeSheet(); toast(fresh.length + ' Einträge übernommen');
+      closeSheet(); toast(fresh.length + ' Einträge' + (blobs ? ' und Belegfotos' : '') + ' übernommen');
     };
   });
 }
@@ -2662,7 +2683,7 @@ document.addEventListener('click', ev => {
   else if (a === 'close-sheet') closeSheet();
   else if (a === 'examples-load') loadExamples();
   else if (a === 'examples-remove') removeExamples();
-  else if (a === 'backup') exportData('json');
+  else if (a === 'backup') exportData('json', {photos:SET.backupPhotos !== false});
   else if (a === 'reload') location.reload();
   else if (a === 'rec-edit') openRecurring(t.dataset.id);
   else if (a === 'item-hist') openItemHistory(t.dataset.key);

@@ -17,10 +17,13 @@ Privates Haushaltsbuch als Web-App (PWA) fürs iPhone: Einträge, mehrere Karten
 2. In der App: Einstellungen → KI-Belegscan → Key einfügen.
 
 ## Backup
-Daten existieren nur auf diesem Gerät. Regelmäßig in den Einstellungen **Backup sichern** und die Datei in „Dateien“ / iCloud Drive ablegen. „Backup laden“ führt ein Backup wieder zusammen.
+Daten existieren nur auf diesem Gerät. Regelmäßig in den Einstellungen **Backup sichern** und die Datei in „Dateien“ / iCloud Drive ablegen. Standardmäßig sind die Belegfotos enthalten (abschaltbar). „Backup laden“ stellt auf einem leeren Gerät alles wieder her und ergänzt sonst nur Fehlendes.
 
 ## Release (für Updates)
 Bei jeder Änderung gemeinsam erhöhen: `APP_VERSION` in `index.html`, `version.json` und `CACHE` in `sw.js`. Die App zeigt dann beim nächsten Öffnen „Neue Version – Jetzt neu laden“.
 
 ## Bank-PDFs
 Transaktions-PDFs von Revolut, Trade Republic und Raiffeisen werden **lokal im Browser** gelesen (pdf.js, `vendor/`, Apache-2.0-Lizenz in `vendor/pdfjs-LICENSE.txt`). Es wird nichts hochgeladen. Gespeichert werden nur die letzten 4 Stellen von Karte und IBAN zur Zuordnung.
+
+## Tests
+`node tests/run.cjs` startet einen lokalen Server und prüft die App im Browser (Playwright/Chromium): Erfassen, Kontostand, Abgleich, Gesten, Sparziele, Artikelsuche, Beleg-Scan, Backup mit Fotos, Bank-Parser, Netzwerkgrenzen. Es werden nur fiktive Beispieldaten aus `tests/fixtures/` verwendet; Anfragen an die Claude-API werden abgefangen. Auf GitHub laufen die Tests bei jedem Push automatisch (`.github/workflows/test.yml`).
