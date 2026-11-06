@@ -339,7 +339,7 @@ details.more[open]>summary::before{content:'− '}
 <script>
 (function(){
 'use strict';
-const APP_VERSION = '2026.11.06-11';
+const APP_VERSION = '2026.11.06-12';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1544,6 +1544,18 @@ function openEntry(id, preset){
 }
 
 /* budgets */
+/* Differenz genau einer Buchung zuordnen: doppelt erfasst oder doppelt abgezogen? */
+function diffHint(id, d){
+  const amt = Math.abs(d), since = addDays(today(), -21);
+  const hits = allEntries().filter(e => (e.cardId === id || e.toCardId === id) && e.amount === amt && e.date >= since).sort((a, b) => b.date.localeCompare(a.date));
+  if (!hits.length) return '';
+  const cd = cardById(id), same = hits.filter(e => e.date === cd.startDate && cd.startAt && (e.createdAt || '') > cd.startAt);
+  const line = e => '<button class="row" data-act="edit" data-id="' + esc(e.id) + '"><span class="row-main"><span class="row-title">' + esc(e.merchant || catById(e.catId).name) + '</span><span class="row-sub">' + esc(DAYL.format(parseISO(e.date))) + ' · ' + esc(originTxt(e)) + '</span></span><span class="row-amt">' + money(e.amount) + '</span></button>';
+  const why = hits.length > 1 ? 'Die Differenz entspricht einer Buchung, die ' + hits.length + '× vorhanden ist – vermutlich doppelt. Eine davon löschen oder zusammenführen.'
+    : same.length ? 'Die Differenz entspricht einer Buchung, die nach dem Eintragen des Stands am selben Tag erfasst wurde – sie war im Bank-Stand vermutlich schon enthalten. Dann „Stand übernehmen“.'
+    : 'Die Differenz entspricht genau dieser Buchung. Prüfen, ob sie falsch oder doppelt ist.';
+  return '<div class="panel" style="margin-top:10px"><h3>Passt genau zu</h3><p class="note" style="margin:0">' + why + '</p><div class="list">' + hits.slice(0, 4).map(line).join('') + '</div></div>';
+}
 function openReconcile(id){
   const cd = cardById(id); if (!cd) return;
   const credit = cd.kind === 'credit', st = cardStatus(cd), appRaw = cardBalance(cd) || 0;
@@ -1561,7 +1573,7 @@ function openReconcile(id){
         const v = val(); ok.disabled = v == null; if (v == null) { box.innerHTML = ''; return; }
         const d = v - appRaw;
         box.innerHTML = d === 0 ? '<div class="impact ok"><span>Stimmt überein</span><b>✓ 0,00</b></div>'
-          : '<div class="impact warn"><span>' + (d < 0 ? 'Bank zeigt weniger – fehlen Ausgaben?' : 'Bank zeigt mehr – fehlen Einnahmen oder doppelt gebucht?') + '</span><b>' + money(Math.abs(d)) + '</b></div><p class="note" style="margin:6px 0 0">Am besten zuerst fehlende Bank-PDFs importieren. „Stand übernehmen“ setzt den Stand ab heute neu, ohne Buchungen zu ändern.</p>';
+          : '<div class="impact warn"><span>' + (d < 0 ? 'Bank zeigt weniger – fehlen Ausgaben?' : 'Bank zeigt mehr – fehlen Einnahmen oder doppelt gebucht?') + '</span><b>' + money(Math.abs(d)) + '</b></div><p class="note" style="margin:6px 0 0">Am besten zuerst fehlende Bank-PDFs importieren. „Stand übernehmen“ setzt den Stand ab heute neu, ohne Buchungen zu ändern.</p>' + diffHint(id, d);
         ok.textContent = d === 0 ? 'Als abgeglichen markieren' : 'Stand übernehmen';
       });
       ok.onclick = async () => {
