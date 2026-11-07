@@ -16,7 +16,7 @@ const ITEM_GROUPS = ['Getränke','Obst & Gemüse','Brot & Gebäck','Milch & Käs
 function normItems(list){
   return (Array.isArray(list) ? list : []).filter(i => i && (i.clean || i.name) && num(i.total) != null).slice(0, 80).map(i => ({
     n:String(i.clean || i.name).trim().slice(0, 60), raw:String(i.name || '').trim().slice(0, 60), g:ITEM_GROUPS.includes(i.group) ? i.group : 'Sonstiges',
-    q:Math.max(0.001, num(i.qty) || 1), t:Math.round(num(i.total) * 100)}));
+    q:Math.max(0.001, num(i.qty) || 1), t:Math.round(num(i.total) * 100), k:i.kind === 'discount' || i.kind === 'deposit' ? i.kind : (i.group === 'Pfand' ? 'deposit' : (num(i.total) < 0 ? 'discount' : 'item'))}));
 }
 /* Gleiche Zahlung schon vorhanden (z. B. aus Bank-PDF)? Dann hängt der Bon dort an */
 function findMergeTarget(amount, date, type){
@@ -30,9 +30,9 @@ function scanPrompt(){
     'Read only what is printed. Do not invent values; use null when something is unreadable.\n' +
     'Reply with only one JSON object of exactly this shape:\n' +
     '{"merchant": string|null, "date": "YYYY-MM-DD"|null, "total": number|null, "currency": string, "docType": "kassenbon"|"rechnung"|"sonstiges", "isRefund": boolean, ' +
-    '"items": [{"name": string, "clean": string, "group": string, "qty": number|null, "total": number}], "vat": [{"rate": number, "net": number|null, "tax": number|null, "gross": number|null}], ' +
+    '"items": [{"name": string, "clean": string, "group": string, "qty": number|null, "total": number, "kind": "item"|"discount"|"deposit"}], "savingsPrinted": number|null, "vat": [{"rate": number, "net": number|null, "tax": number|null, "gross": number|null}], ' +
     '"paymentHint": string|null, "cardLast4": string|null, "dueDate": "YYYY-MM-DD"|null, "categoryId": string, "note": string, "issues": [string], "confidence": number}\n' +
-    'Field rules:\n- merchant: the short brand or shop name people use, without legal form, country or branch ("Lidl", not "Lidl Österreich GmbH, Filiale Musterort").\n- total: the amount actually paid or owed, in currency units (23.45), positive.\n- items: line items with their line totals; discounts and Pfand returns as negative totals; at most 60 lines. name = exactly as printed; clean = readable German product name without codes (e.g. "MIN.WASS.PRICK 6X1,5L" -> "Mineralwasser prickelnd 6×1,5 l"); qty = number of units if printed, else 1; group = one of: ' + ITEM_GROUPS.join(', ') + '.\n' +
+    'Field rules:\n- merchant: the short brand or shop name people use, without legal form, country or branch ("Lidl", not "Lidl Österreich GmbH, Filiale Musterort").\n- total: the amount actually paid or owed, in currency units (23.45), positive.\n- items: line items with their line totals; discounts and Pfand returns as negative totals; at most 60 lines. kind = "discount" for every price reduction line (Rabatt, Aktion, Coupon, Lidl Plus, Mengenrabatt, Mitarbeiterrabatt, "-20%"), "deposit" for Pfand, otherwise "item". Never list summary lines such as "Sie haben gespart", "Ersparnis gesamt" or "Preisvorteil" as items; put that printed total savings amount (positive) into savingsPrinted, else null. name = exactly as printed; clean = readable German product name without codes (e.g. "MIN.WASS.PRICK 6X1,5L" -> "Mineralwasser prickelnd 6×1,5 l"); qty = number of units if printed, else 1; group = one of: ' + ITEM_GROUPS.join(', ') + '.\n' +
     '- vat: one entry per tax rate in percent (20, 10, 13, 19, 7, 0) as printed in the tax summary.\n- paymentHint: how it was paid as printed, e.g. "Visa", "Maestro", "Bar", "Apple Pay Mastercard".\n' +
     '- cardLast4: last four card digits if printed (masked numbers like ****1234), else null.\n- dueDate: payment due date on invoices only.\n' +
     '- categoryId: the best matching id from this list:\n' + list + '\n' +
@@ -179,10 +179,11 @@ async function onReceiptFiles(files){
   const cm = matchCard(r);
   const draft = {type, amount:total != null ? Math.round(Math.abs(total) * 100) : '', date:validISO(r.date) ? r.date : today(), catId:okCat ? r.categoryId : (type === 'income' ? 'einnahmen' : 'sonstiges'), cardId:cm.id, merchant:r.merchant ? shortMerchant(r.merchant) : '', merchantRaw:r.merchant ? String(r.merchant).slice(0, 80) : '', note:r.note ? String(r.note).slice(0, 80) : ''};
   draft.items = normItems(r.items);
+  { const sp = num(r.savingsPrinted); if (sp != null && sp > 0) draft.savings = Math.round(sp * 100); }
   const target = draft.type === 'expense' ? findMergeTarget(draft.amount, draft.date) : null;
   showReview(!!target);
   function showReview(useMerge){
-  const d0 = useMerge ? Object.assign(clean(target), {items:draft.items, merchant:(target.source === 'bank' && draft.merchant) ? draft.merchant : (target.merchant || draft.merchant), note:target.note || draft.note}) : Object.assign({}, draft);
+  const d0 = useMerge ? Object.assign(clean(target), {items:draft.items, savings:draft.savings, merchant:(target.source === 'bank' && draft.merchant) ? draft.merchant : (target.merchant || draft.merchant), note:target.note || draft.note}) : Object.assign({}, draft);
   const checks = runChecks(r, d0, cm, useMerge ? target : null), verdict = verdictOf(checks);
   let detail = '';
   const vat = (Array.isArray(r.vat) ? r.vat : []).filter(v => v && num(v.rate) != null);

@@ -13,7 +13,7 @@ const server = http.createServer((q, r) => {
   const f = path.join(ROOT, p); if (!f.startsWith(ROOT) || !fs.existsSync(f)) { r.writeHead(404); return r.end(); }
   r.writeHead(200, {'content-type':TYPES[path.extname(f)] || 'application/octet-stream'}); fs.createReadStream(f).pipe(r);
 });
-const FAKE_SCAN = {merchant:'Testmarkt', date:'2026-01-15', total:12.4, currency:'EUR', docType:'kassenbon', isRefund:false, items:[{name:'MILCH 1L', clean:'Milch 1l', group:'Milchprodukte', qty:2, total:2.98}], vat:[], paymentHint:'Bar', cardLast4:null, dueDate:null, categoryId:'lebensmittel', note:'Einkauf', issues:[], confidence:0.9};
+const FAKE_SCAN = {merchant:'Testmarkt', date:'2026-01-15', total:12.4, currency:'EUR', docType:'kassenbon', isRefund:false, items:[{name:'MILCH 1L', clean:'Milch 1l', group:'Milch & Käse', qty:2, total:2.98, kind:'item'}, {name:'AKTION -20%', clean:'Aktion −20 %', group:'Milch & Käse', qty:1, total:-0.60, kind:'discount'}], savingsPrinted:0.6, vat:[], paymentHint:'Bar', cardLast4:null, dueDate:null, categoryId:'lebensmittel', note:'Einkauf', issues:[], confidence:0.9};
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const DUMP = () => new Promise(res => { const r = indexedDB.open('kassabuch'); r.onsuccess = () => { const t = r.result.transaction(['kv', 'entries', 'blobs']); const a = t.objectStore('kv').get('profile'), b = t.objectStore('entries').getAll(), c = t.objectStore('blobs').count(); t.oncomplete = () => res({profile:a.result, entries:b.result, blobs:c.result}); }; });
 const SWIPE = ([sel, dx, hold]) => new Promise(res => { const el = document.querySelector(sel); const b = el.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + Math.min(b.height / 2, 30);
@@ -111,11 +111,20 @@ async function addEntry({amount, merchant, cat, card}){
     ok(/am günstigsten Markt B/.test(await page.innerText('#itemResults')), 'Suche');
     await page.click('#itemResults [data-act="item-hist"]'); await page.waitForTimeout(300); ok(/Preis je Händler/.test(await page.innerText('#sheetBody')), 'Händlervergleich');
   });
+  await test('Rabatte: Summe, Quote, Händler; Rabattzeilen nicht als Artikel', async () => {
+    await fresh(); await seed(`(p, es) => { const d = '${today()}';
+      es.put({id:'a', type:'expense', amount:900, catId:'lebensmittel', date:d, merchant:'Markt A', items:[{n:'Käse', g:'Milch & Käse', q:1, t:1000}, {n:'Aktion Käse', g:'Milch & Käse', q:1, t:-100}]});
+      es.put({id:'b', type:'expense', amount:1800, catId:'lebensmittel', date:d, merchant:'Markt B', items:[{n:'Kaffee', g:'Vorrat & Konserven', q:1, t:2000, k:'item'}, {n:'Coupon', g:'Sonstiges', q:1, t:-200, k:'discount'}, {n:'Pfand', g:'Pfand', q:1, t:-25, k:'deposit'}]});
+      es.put({id:'c', type:'expense', amount:500, catId:'lebensmittel', date:d, merchant:'Markt A', items:[{n:'Brot', g:'Brot & Gebäck', q:1, t:500}]}); }`);
+    await go('statistik'); const t = await page.innerText('#view');
+    ok(/Gespart durch Rabatte/.test(t) && /€\s3,00/.test(t), 'Summe fehlt'); ok(/auf 2 von 3 Bons · 9 %/.test(t), 'Quote: ' + (t.match(/auf .* Bons[^\n]*/) || [''])[0]);
+    ok(!/Aktion Käse[\s\S]*Was ich kaufe/.test(t) && !/Was ich kaufe[\s\S]*Coupon[\s\S]*Rabatte/.test(t), 'Rabattzeile als Artikel gelistet');
+  });
   await test('Beleg-Scan (API abgefangen) → Eintrag mit Artikeln und Foto', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
     await go('uebersicht'); await page.setInputFiles('#receiptInput', {name:'bon.png', mimeType:'image/png', buffer:TINY_PNG}); await page.waitForTimeout(2500);
     const save = await page.$('#f-save'); if (save) { await save.click(); await page.waitForTimeout(500); }
-    const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].items.length === 1 && d.blobs === 1, JSON.stringify({n:d.entries.length, b:d.blobs}));
+    const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].items.length === 2 && d.entries[0].items[1].k === 'discount' && d.entries[0].savings === 60 && d.blobs === 1, JSON.stringify({n:d.entries.length, b:d.blobs}));
   });
   await test('Backup mit Belegfotos → auf leerem Gerät vollständig wiederherstellen', async () => {
     await loadPlan(); await page.click('[data-act="settings"]'); await page.waitForTimeout(400);

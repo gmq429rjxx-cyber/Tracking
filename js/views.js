@@ -377,9 +377,32 @@ function curveSection(){
   const txt = upto && b[b.length - 1] ? 'Am ' + upto + '. ' + (diff > 0 ? '<b class="badtxt">' + money(diff) + ' mehr</b>' : '<b class="pos">' + money(-diff) + ' weniger</b>') + ' als im Vormonat zum selben Tag.' : '';
   return '<section class="block"><div class="block-head"><h2>Verlauf im Monat</h2></div><div class="chartbox">' + svg + '<div class="legend"><span><i class="dot" style="--c:var(--accent)"></i>' + esc(MONTH.format(parseISO(k + '-01')).split(' ')[0]) + '</span><span><i class="dot" style="--c:var(--muted)"></i>Vormonat</span>' + (tb ? '<span><i class="dot" style="--c:var(--warn)"></i>Budget-Soll</span>' : '') + '</div>' + (txt ? '<p class="note" style="margin:8px 0 0">' + txt + '</p>' : '') + '</div></section>';
 }
+/* Rabatte: Rabattzeilen der Bons (neu: kind=discount, ältere Bons: negative Zeile ohne Pfand) */
+const isDiscount = it => it.k ? it.k === 'discount' : (it.t < 0 && it.g !== 'Pfand');
+const isGoods = it => !isDiscount(it) && it.k !== 'deposit' && it.g !== 'Pfand';
+const entryDiscount = e => (e.items || []).filter(isDiscount).reduce((a, it) => a - it.t, 0) || e.savings || 0;
+function discountsSection(list){
+  const bons = list.filter(e => e.type === 'expense' && e.items && e.items.length);
+  if (!bons.length) return '';
+  let tot = 0, nB = 0, paid = 0; const byM = {}, lines = {};
+  for (const e of bons) {
+    const d = entryDiscount(e); paid += e.amount; if (!d) continue;
+    tot += d; nB++; const m = e.merchant || 'Unbekannt'; byM[m] = (byM[m] || 0) + d;
+    for (const it of e.items) if (isDiscount(it)) { const k = it.n; const a = lines[k] = lines[k] || {n:0, t:0, m}; a.n++; a.t -= it.t; }
+  }
+  let h = '<section class="block"><div class="block-head"><h2>Rabatte</h2></div>';
+  if (!tot) return h + '<div class="list"><div class="empty">Auf ' + bons.length + (bons.length === 1 ? ' Bon' : ' Bons') + ' in diesem Zeitraum kein Rabatt.</div></div></section>';
+  const quote = Math.round(tot / (paid + tot) * 100);
+  h += '<div class="panel" style="flex-direction:row;align-items:center;justify-content:space-between;gap:12px"><div><div class="note">Gespart durch Rabatte</div><div class="note">auf ' + nB + ' von ' + bons.length + ' Bons · ' + quote + ' % vom Normalpreis</div></div><strong class="num pos" style="font-size:24px;font-family:var(--f-display)">' + money(tot) + '</strong></div>';
+  const ms = Object.entries(byM).sort((a, b) => b[1] - a[1]);
+  if (ms.length > 1) h += '<div class="list">' + ms.slice(0, 6).map(([m, v]) => '<div class="row"><span class="row-main"><span class="row-title">' + esc(m) + '</span></span><span class="row-amt pos">' + money(v) + '</span></div>').join('') + '</div>';
+  const top = Object.entries(lines).sort((a, b) => b[1].t - a[1].t).slice(0, 5);
+  h += '<p class="note" style="margin:8px 2px 4px">Größte Rabatte</p><div class="list">' + top.map(([k, a]) => '<div class="row"><span class="row-main"><span class="row-title">' + esc(k) + '</span><span class="row-sub">' + esc(a.m) + (a.n > 1 ? ' · ' + a.n + '×' : '') + '</span></span><span class="row-amt pos">' + money(a.t) + '</span></div>').join('') + '</div>';
+  return h + '</section>';
+}
 function itemsSection(list){
   const rows = [];
-  for (const e of list) if (e.items) for (const it of e.items) rows.push(Object.assign({date:e.date, merchant:e.merchant || ''}, it));
+  for (const e of list) if (e.items) for (const it of e.items) if (isGoods(it)) rows.push(Object.assign({date:e.date, merchant:e.merchant || ''}, it));
   let h = '<section class="block"><div class="block-head"><h2>Was ich kaufe</h2></div>';
   if (allEntries().some(e => e.items && e.items.length)) h += '<input class="input" id="itemSearch" type="search" placeholder="Artikel suchen, z. B. Wasser" autocomplete="off" autocapitalize="off" value="' + esc(S.itemQ || '') + '"><div id="itemResults">' + itemSearchHTML(S.itemQ || '') + '</div>';
   if (!rows.length) return h + '<div class="list"><div class="empty">Scanne Kassenbons, dann siehst du hier deine meistgekauften Artikel und wie sich ihre Preise entwickeln.</div></div></section>';
@@ -401,7 +424,7 @@ function itemSearchHTML(q){
   q = q.trim().toLowerCase(); if (q.length < 2) return '';
   const agg = {};
   for (const e of allEntries()) if (e.items) for (const it of e.items) {
-    if (!it.n || it.g === 'Pfand') continue; const k = it.n.toLowerCase(); if (!k.includes(q) && !(it.g || '').toLowerCase().includes(q)) continue;
+    if (!it.n || !isGoods(it)) continue; const k = it.n.toLowerCase(); if (!k.includes(q) && !(it.g || '').toLowerCase().includes(q)) continue;
     const a = agg[k] = agg[k] || {name:it.n, n:0, t:0, last:null, m:{}};
     const unit = Math.round(it.t / (it.q || 1)); a.n++; a.t += it.t;
     if (!a.last || e.date >= a.last.date) a.last = {date:e.date, unit};
@@ -428,7 +451,7 @@ function priceByMerchant(hist){
 }
 function openItemHistory(key){
   const hist = [];
-  for (const e of allEntries()) if (e.items) for (const it of e.items) if (it.n.toLowerCase() === key) hist.push({date:e.date, merchant:e.merchant || '', unit:Math.round(it.t / (it.q || 1)), q:it.q, t:it.t, name:it.n, g:it.g});
+  for (const e of allEntries()) if (e.items) for (const it of e.items) if (isGoods(it) && it.n.toLowerCase() === key) hist.push({date:e.date, merchant:e.merchant || '', unit:Math.round(it.t / (it.q || 1)), q:it.q, t:it.t, name:it.n, g:it.g});
   if (!hist.length) return;
   hist.sort((a, b) => a.date.localeCompare(b.date));
   const first = hist[0], last = hist[hist.length - 1], ch = first.unit ? (last.unit - first.unit) / first.unit * 100 : 0;
@@ -484,6 +507,7 @@ function viewStats(){
   h += '<section class="block"><div class="block-head"><h2>' + (year ? 'Monate' : 'Letzte 6 Monate') + '</h2></div><div class="chartbox">' + svg + '<div class="legend"><span><i class="dot" style="--c:var(--ok)"></i>Einnahmen</span><span><i class="dot" style="--c:var(--bad)"></i>Ausgaben</span></div></div></section>';
 
   h += itemsSection(list);
+  h += discountsSection(list);
   // categories
   const sc = spentByCat(list);
   const cr = Object.entries(sc).filter(([id]) => !isSaving(id)).sort((a, b) => b[1] - a[1]);

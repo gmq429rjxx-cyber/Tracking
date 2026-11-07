@@ -190,8 +190,9 @@ const hasBank = e => !!(e.bankKeys && e.bankKeys.length);
 const hasBon = e => !!((e.receipts && e.receipts.length) || (e.items && e.items.length));
 function originTxt(e){ const t = []; if (hasBank(e)) t.push('Bank-PDF'); if (hasBon(e)) t.push('Bon'); if (!t.length) t.push(e.source === 'applepay' ? 'Apple Pay' : 'manuell'); return t.join(' + '); }
 function originHTML(e){
+  const disc = entryDiscount(e);
   const chips = (hasBank(e) ? '<span class="chip ok">Bank-PDF</span>' : '') + (hasBon(e) ? '<span class="chip ok">Bon</span>' : '') + (!hasBank(e) && !hasBon(e) ? '<span class="chip info">' + esc(originTxt(e)) + '</span>' : '');
-  return '<div class="panel" style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span class="note">Quelle</span><span style="display:flex;gap:6px;flex-wrap:wrap">' + chips + (e.ai && e.ai.status ? verdictChip(e.ai.status) : '') + '</span></div>';
+  return '<div class="panel" style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span class="note">Quelle</span><span style="display:flex;gap:6px;flex-wrap:wrap">' + chips + (disc ? '<span class="chip ok">Rabatt ' + money(disc) + '</span>' : '') + (e.ai && e.ai.status ? verdictChip(e.ai.status) : '') + '</span></div>';
 }
 /* Gleicher Betrag (±0,05), ±3 Tage, eine Seite Bank-PDF, die andere nicht */
 function findDuplicate(e){
