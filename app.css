@@ -212,8 +212,8 @@ details summary{cursor:pointer;font-weight:600;font-size:14px}
 .catall h4{margin:0;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .datebar{display:flex;gap:6px;align-items:center}
 .datebar .input{flex:1;min-width:0}
-input[type=date].input{min-width:0;width:100%;display:block;-webkit-appearance:none;appearance:none;text-align:left}
-input[type=date]::-webkit-date-and-time-value{text-align:left}
+input[type=date].input,input[type=month].input{min-width:0;width:100%;max-width:100%;display:block;-webkit-appearance:none;appearance:none;text-align:left;line-height:1.25}
+input[type=date]::-webkit-date-and-time-value,input[type=month]::-webkit-date-and-time-value{text-align:left;margin:0}
 .formfoot{position:sticky;bottom:calc(-21px - env(safe-area-inset-bottom));margin:0 -16px;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent);z-index:2}
 details.more>summary{cursor:pointer;list-style:none;padding:4px 0}
 details.more>summary::-webkit-details-marker{display:none}
