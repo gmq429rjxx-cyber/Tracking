@@ -13,7 +13,7 @@ const server = http.createServer((q, r) => {
   const f = path.join(ROOT, p); if (!f.startsWith(ROOT) || !fs.existsSync(f)) { r.writeHead(404); return r.end(); }
   r.writeHead(200, {'content-type':TYPES[path.extname(f)] || 'application/octet-stream'}); fs.createReadStream(f).pipe(r);
 });
-const FAKE_SCAN = {merchant:'Testmarkt', date:'2026-01-15', total:12.4, currency:'EUR', docType:'kassenbon', isRefund:false, items:[{name:'MILCH 1L', clean:'Milch 1l', group:'Milch & Käse', qty:2, total:2.98, kind:'item'}, {name:'AKTION -20%', clean:'Aktion −20 %', group:'Milch & Käse', qty:1, total:-0.60, kind:'discount'}], savingsPrinted:0.6, vat:[], paymentHint:'Bar', cardLast4:null, dueDate:null, categoryId:'lebensmittel', note:'Einkauf', issues:[], confidence:0.9};
+const FAKE_SCAN = {merchant:'Testmarkt', date:'2026-01-15', total:12.4, currency:'EUR', docType:'kassenbon', isRefund:false, items:[{name:'MILCH 1L', clean:'Milch 1l', group:'Milch & Käse', qty:2, total:2.98, kind:'item'}, {name:'AKTION -20%', clean:'Aktion −20 %', group:'Milch & Käse', qty:1, total:-0.60, kind:'discount'}], savingsPrinted:0.6, taxHint:'wk', warrantyMonths:24, vat:[], paymentHint:'Bar', cardLast4:null, dueDate:null, categoryId:'lebensmittel', note:'Einkauf', issues:[], confidence:0.9};
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const DUMP = () => new Promise(res => { const r = indexedDB.open('kassabuch'); r.onsuccess = () => { const t = r.result.transaction(['kv', 'entries', 'blobs']); const a = t.objectStore('kv').get('profile'), b = t.objectStore('entries').getAll(), c = t.objectStore('blobs').count(); t.oncomplete = () => res({profile:a.result, entries:b.result, blobs:c.result}); }; });
 const SWIPE = ([sel, dx, hold]) => new Promise(res => { const el = document.querySelector(sel); const b = el.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + Math.min(b.height / 2, 30);
@@ -120,11 +120,31 @@ async function addEntry({amount, merchant, cat, card}){
     ok(/Gespart durch Rabatte/.test(t) && /€\s3,00/.test(t), 'Summe fehlt'); ok(/auf 2 von 3 Bons · 9 %/.test(t), 'Quote: ' + (t.match(/auf .* Bons[^\n]*/) || [''])[0]);
     ok(!/Aktion Käse[\s\S]*Was ich kaufe/.test(t) && !/Was ich kaufe[\s\S]*Coupon[\s\S]*Rabatte/.test(t), 'Rabattzeile als Artikel gelistet');
   });
+  await test('Abo-Erkennung: monatlicher Händler, Preiserhöhung, als Dauerauftrag übernehmen', async () => {
+    await fresh(); await seed(`(p, es) => { const d = n => { const x = new Date(); x.setDate(x.getDate() - n); return x.toISOString().slice(0, 10); };
+      [[95, 1299], [65, 1299], [35, 1299], [5, 1499]].forEach(([n, a], i) => es.put({id:'s' + i, type:'expense', amount:a, catId:'abos', date:d(n), merchant:'Streamingdienst'}));
+      [[40, 5000], [33, 3000], [12, 8000], [2, 2000]].forEach(([n, a], i) => es.put({id:'m' + i, type:'expense', amount:a, catId:'lebensmittel', date:d(n), merchant:'Supermarkt'})); }`);
+    await go('uebersicht'); ok(/Preiserhöhung: Streamingdienst/.test(await page.innerText('#view')), 'Hinweis Preiserhöhung fehlt');
+    await go('fixkosten'); const t = await page.innerText('#view'); ok(/Erkannte Abos/.test(t) && /Streamingdienst/.test(t) && /teurer/.test(t), 'Abo nicht erkannt'); ok(!/Supermarkt/.test(t), 'Supermarkt fälschlich als Abo');
+    await page.click('[data-act="sub-rule"]'); await page.waitForTimeout(400);
+    const r = (await page.evaluate(DUMP)).profile.recurring; ok(r.length === 1 && r[0].amount === 1499 && r[0].freq === 'monthly', JSON.stringify(r));
+    ok(!/Erkannte Abos/.test(await page.innerText('#view')), 'Vorschlag bleibt nach Übernahme');
+  });
+  await test('Steuerbelege und Garantie: im Eintrag setzen, Liste, CSV, Hinweis vor Ablauf', async () => {
+    await fresh(); await page.click('.tabbar [data-act="add"]'); await page.fill('#f-amount', '45'); await page.fill('#f-merchant', 'Fachbuchhandlung');
+    await page.click('#f-extra summary'); await page.selectOption('#f-tax', 'wk'); await page.click('#f-save'); await page.waitForTimeout(400);
+    await seed(`(p, es) => { const x = new Date(); x.setDate(x.getDate() + 30); es.put({id:'w', type:'expense', amount:39900, catId:'sonstiges', date:'2024-12-01', merchant:'Elektrohandel', note:'Staubsauger', warrantyUntil:x.toISOString().slice(0, 10)}); const y = new Date(); y.setDate(y.getDate() + 200); es.put({id:'w2', type:'expense', amount:9900, catId:'sonstiges', date:'2026-01-01', merchant:'Fernsehladen', warrantyUntil:y.toISOString().slice(0, 10)}); }`);
+    await go('uebersicht'); { const v = await page.innerText('#view'); ok(/Garantie endet: Elektrohandel/.test(v), 'Garantie-Hinweis fehlt'); ok(!/Garantie endet: Fernsehladen/.test(v), 'Hinweis zu früh'); }
+    await go('statistik'); await page.click('[data-act="taxlist"]'); await page.waitForTimeout(300); ok(/Werbungskosten/.test(await page.innerText('#sheetBody')) && /Fachbuchhandlung/.test(await page.innerText('#sheetBody')), 'Steuerliste');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tx-csv')]); const f = path.join(require('os').tmpdir(), 'kb-tax.csv'); await dl.saveAs(f);
+    ok(/Fachbuchhandlung/.test(fs.readFileSync(f, 'utf8')), 'CSV'); await closeSheet();
+    await page.click('[data-act="warranties"]'); await page.waitForTimeout(300); ok(/Staubsauger/.test(await page.innerText('#sheetBody')), 'Garantieliste');
+  });
   await test('Beleg-Scan (API abgefangen) → Eintrag mit Artikeln und Foto', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
     await go('uebersicht'); await page.setInputFiles('#receiptInput', {name:'bon.png', mimeType:'image/png', buffer:TINY_PNG}); await page.waitForTimeout(2500);
     const save = await page.$('#f-save'); if (save) { await save.click(); await page.waitForTimeout(500); }
-    const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].items.length === 2 && d.entries[0].items[1].k === 'discount' && d.entries[0].savings === 60 && d.blobs === 1, JSON.stringify({n:d.entries.length, b:d.blobs}));
+    const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].items.length === 2 && d.entries[0].items[1].k === 'discount' && d.entries[0].savings === 60 && d.entries[0].tax === 'wk' && /^20\d\d-\d\d-\d\d$/.test(d.entries[0].warrantyUntil || '') && d.blobs === 1, JSON.stringify({n:d.entries.length, b:d.blobs}));
   });
   await test('Backup mit Belegfotos → auf leerem Gerät vollständig wiederherstellen', async () => {
     await loadPlan(); await page.click('[data-act="settings"]'); await page.waitForTimeout(400);

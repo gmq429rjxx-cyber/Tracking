@@ -125,9 +125,49 @@ function fixedSums(){
   for (const r of S.profile.recurring) if (isActive(r)) { const m = r.amount * (FREQ_PER_MONTH[r.freq] || 1); if (r.type === 'expense') exp += m; else if (r.type === 'income') inc += m; }
   return {exp:Math.round(exp), inc:Math.round(inc)};
 }
+/* ---------- Abo-Erkennung: gleicher Händler, regelmäßiger Abstand, ähnlicher Betrag ---------- */
+const median = a => { const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function detectSubs(){
+  const ign = new Set(S.profile.subIgnore || []), since = addDays(today(), -430), groups = {};
+  const ruled = new Set(S.profile.recurring.filter(isActive).map(r => (r.merchant || '').toLowerCase().trim()).filter(Boolean));
+  for (const e of allEntries()) {
+    if (e.type !== 'expense' || e.recurringId || !e.merchant || e.date < since || isSaving(e.catId) || e.example) continue;
+    const k = e.merchant.toLowerCase().trim(); (groups[k] = groups[k] || []).push(e);
+  }
+  const out = [];
+  for (const [k, l] of Object.entries(groups)) {
+    if (ign.has(k) || ruled.has(k) || l.length < 2) continue;
+    l.sort((a, b) => a.date.localeCompare(b.date));
+    const gaps = l.slice(1).map((e, i) => dayDiff(e.date, l[i].date)), g = median(gaps);
+    const freq = l.length >= 3 && g >= 26 && g <= 35 && gaps.filter(x => x >= 20 && x <= 40).length >= Math.max(2, gaps.length - 1) ? 'monthly'
+      : g >= 350 && g <= 380 ? 'yearly' : null;
+    if (!freq) continue;
+    const recent = l.slice(-3).map(e => e.amount), med = median(recent);
+    if (recent.some(a => Math.abs(a - med) > med * 0.25)) continue;
+    const last = l[l.length - 1], prev = l[l.length - 2], rise = last.amount - prev.amount;
+    if (freq === 'monthly' && dayDiff(today(), last.date) > 60) continue;   // gekündigt oder ausgelaufen
+    out.push({key:k, merchant:last.merchant, last, freq, n:l.length, amount:last.amount, rise:rise > Math.max(10, prev.amount * 0.01) ? rise : 0, perYear:freq === 'monthly' ? last.amount * 12 : last.amount, next:addMonths(last.date.slice(0, 7), freq === 'monthly' ? 1 : 12) + last.date.slice(7)});
+  }
+  return out.sort((a, b) => b.perYear - a.perYear);
+}
+function subsSection(){
+  const subs = detectSubs(); if (!subs.length) return '';
+  return '<section class="block"><div class="block-head"><h2>Erkannte Abos</h2><span class="note num">≈ ' + money0(subs.reduce((a, x) => a + x.perYear, 0)) + '/Jahr</span></div><div class="list">' + subs.map(x =>
+    '<div class="irow two"><div class="row-main"><span class="row-title">' + esc(x.merchant) + (x.rise ? ' <span class="chip warn">teurer + ' + money(x.rise) + '</span>' : '') + '</span><span class="row-sub">' + FREQ[x.freq] + ' · ' + money(x.amount) + ' · ' + x.n + '× seit ' + esc(MON.format(parseISO(allEntries().filter(e => (e.merchant || '').toLowerCase().trim() === x.key).map(e => e.date).sort()[0]))) + '</span>' +
+    '<span style="display:flex;gap:12px;margin-top:6px"><button class="linkbtn" data-act="sub-rule" data-key="' + esc(x.key) + '">Als Dauerauftrag</button><button class="linkbtn" style="color:var(--muted)" data-act="sub-ign" data-key="' + esc(x.key) + '">Kein Abo</button></span></div><span class="row-amt">' + money0(x.perYear) + '<small>pro Jahr</small></span></div>').join('') + '</div>' +
+    '<p class="note" style="margin:6px 2px 0">Als Dauerauftrag bucht die App künftige Zahlungen selbst; Bank-PDFs mit gleichem Betrag werden zusammengeführt.</p></section>';
+}
+async function subToRule(key){
+  const x = detectSubs().find(s => s.key === key); if (!x) return;
+  const e = x.last, p = clean(S.profile);
+  p.recurring.push({id:'r-' + newId(), type:'expense', amount:e.amount, catId:e.catId || '', cardId:e.cardId || '', toCardId:null, merchant:e.merchant, note:'', freq:x.freq, day:parseISO(e.date).getDate(), startDate:e.date, lastBooked:e.date, endDate:null, active:true});
+  await saveProfile(p); toast('Dauerauftrag angelegt – nächste Buchung ' + DAYL.format(parseISO(x.next)));
+}
+async function subIgnore(key){ const p = clean(S.profile); p.subIgnore = [...new Set((p.subIgnore || []).concat(key))]; await saveProfile(p); toast('Wird nicht mehr als Abo vorgeschlagen'); }
 function viewFixed(){
   const rules = S.profile.recurring.slice();
   let h = '<div class="monthbar"><h1>Fixkosten</h1><button class="btn small" data-act="rec-add">' + ICON.plus + 'Dauerauftrag</button></div><div style="display:flex;flex-direction:column;gap:18px">';
+  h += subsSection();
   if (!rules.length) return h + '<div class="list"><div class="empty"><strong>Noch keine Daueraufträge</strong><span>Kredit, Miete, Abos oder Gehalt einmal anlegen. Sie werden dann am Fälligkeitstag automatisch gebucht.</span><button class="btn small primary" data-act="rec-add">Ersten Dauerauftrag anlegen</button></div></div></div>';
   const fs = fixedSums();
   h += '<section class="hero"><div><div class="eyebrow">Fixkosten pro Monat</div><div class="big">' + money(fs.exp) + '</div></div><div class="kv"><div><span>Pro Jahr</span><strong>' + money0(fs.exp * 12) + '</strong></div><div><span>Fixe Einnahmen</span><strong class="pos">' + money0(fs.inc) + '</strong></div><div><span>Bleibt frei</span><strong class="' + (fs.inc - fs.exp < 0 ? 'badtxt' : '') + '">' + money0(fs.inc - fs.exp) + '</strong></div></div><p class="note" style="margin:0">Vierteljährliche und jährliche Beträge sind auf den Monat umgerechnet.</p></section>';

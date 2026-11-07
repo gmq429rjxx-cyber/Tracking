@@ -85,6 +85,10 @@ function viewOverview(){
   }
   h += '</section>';
 
+  { const soon = warrantyList().filter(e => dayDiff(e.warrantyUntil, today()) <= 60), rises = detectSubs().filter(x => x.rise && dayDiff(today(), x.last.date) <= 45), notes = [];
+    for (const e of soon.slice(0, 2)) notes.push('<button class="row" data-act="warranties"><span class="row-main"><span class="row-title">Garantie endet: ' + esc(e.merchant || catById(e.catId).name) + (e.note ? ' · ' + esc(e.note) : '') + '</span><span class="row-sub">am ' + esc(DAYL.format(parseISO(e.warrantyUntil))) + ' – Mängel jetzt noch melden</span></span><span class="chev">' + ICON.right + '</span></button>');
+    for (const x of rises.slice(0, 2)) notes.push('<button class="row" data-act="tab" data-tab="fixkosten"><span class="row-main"><span class="row-title">Preiserhöhung: ' + esc(x.merchant) + '</span><span class="row-sub">+ ' + money(x.rise) + ' auf ' + money(x.amount) + ' · ≈ + ' + money0(x.rise * (x.freq === 'monthly' ? 12 : 1)) + ' pro Jahr</span></span><span class="chev">' + ICON.right + '</span></button>');
+    if (notes.length) h += '<div class="list">' + notes.join('') + '</div>'; }
   if ((S.profile.goals || []).length) h += '<section class="block"><div class="block-head"><h2>Sparziele</h2><button class="linkbtn" data-act="tab" data-tab="budgets">Alle</button></div><div class="list">' + S.profile.goals.slice(0, 2).map(goalRow).join('') + '</div></section>';
   // budgets needing attention
   const spent = spentByCat(list);
@@ -484,6 +488,8 @@ function viewStats(){
   h += '<div class="statgrid"><div class="stat"><span>Ausgaben</span><strong>' + money(s.exp) + '</strong>' + cmp + '</div><div class="stat"><span>Einnahmen</span><strong class="pos">' + money(s.inc) + '</strong></div><div class="stat"><span>Gespart</span><strong>' + money(s.sav) + '</strong>' + (s.inc ? '<em class="muted">Sparquote ' + Math.round((s.inc - s.exp) / s.inc * 100) + ' %</em>' : '') + '</div><div class="stat"><span>Saldo</span><strong class="' + (s.bal < 0 ? 'badtxt' : '') + '">' + money(s.bal) + '</strong><em class="muted">Ø ' + money(Math.round(s.exp / Math.max(1, days))) + ' Ausgaben/Tag</em></div></div>';
   if (biggest) h += '<div class="panel" style="flex-direction:row;align-items:center;gap:12px">' + badge(catById(biggest.catId)) + '<div class="row-main"><span class="row-sub">Größte Einzelausgabe</span><span class="row-title">' + esc(biggest.merchant || catById(biggest.catId).name) + ' · ' + money(biggest.amount) + '</span></div></div>';
 
+  { const y = (year ? String(year) : S.month.slice(0, 4)), nt = allEntries().filter(e => e.tax && e.date.startsWith(y)).length, nw = warrantyList().length;
+    h += '<div class="btnrow">' + '<button class="btn small" data-act="taxlist" data-y="' + esc(y) + '">Steuerbelege ' + esc(y) + (nt ? ' (' + nt + ')' : '') + '</button><button class="btn small" data-act="warranties">Garantien' + (nw ? ' (' + nw + ')' : '') + '</button></div>'; }
   if (!year && list.length) h += '<button class="btn" data-act="review" data-k="' + esc(S.month) + '">Monatsrückblick ' + esc(monthLabel(S.month).split(' ')[0]) + '</button>';
   if (!year) h += curveSection();
   // trend chart

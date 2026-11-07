@@ -49,6 +49,10 @@ document.addEventListener('click', ev => {
   else if (a === 'sw-del') { if (!t.dataset.sure) { t.dataset.sure = '1'; t.textContent = 'Sicher?'; return; } deleteEntries([t.dataset.id]).then(() => toast('Gelöscht')); }
   else if (a === 'sw-settle') { const e = S.entries.get(t.dataset.id); if (e) saveEntry(Object.assign(clean(e), {pending:false, settledManually:today()})).then(() => toast('Als gebucht markiert')); }
   else if (a === 'goal-add') openGoal(null);
+  else if (a === 'sub-rule') subToRule(t.dataset.key);
+  else if (a === 'sub-ign') subIgnore(t.dataset.key);
+  else if (a === 'taxlist') openTaxList(t.dataset.y);
+  else if (a === 'warranties') openWarranties();
   else if (a === 'goal-edit') openGoal(t.dataset.id);
   else if (a === 'toggle-sec') { toggleCollapsed(t.dataset.sec); render(); }
   else if (a === 'repeat') { closeSheet(); const e = S.entries.get(t.dataset.id); if (e) setTimeout(() => openEntry(null, {type:e.type, merchant:e.merchant, catId:e.catId, cardId:e.cardId, toCardId:e.toCardId, amount:e.amount}), 260); }

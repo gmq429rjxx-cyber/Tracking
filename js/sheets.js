@@ -59,6 +59,10 @@ function entryFormHTML(d){
       ? '<p class="note full" style="margin:0">Gebucht aus einem Dauerauftrag. <button type="button" class="linkbtn" data-act="rec-edit" data-id="' + esc(d.recurringId) + '">Dauerauftrag bearbeiten</button></p>'
       : '<details class="more full"' + (d.rep ? ' open' : '') + '><summary>Wiederholen</summary><label class="field" style="margin-top:8px"><span class="visually-hidden">Wiederholen</span><select class="input" id="f-rep"><option value="">Nein, einmalig</option>' + Object.entries(FREQ).map(([k, v]) => '<option value="' + k + '"' + (d.rep === k ? ' selected' : '') + '>' + v.charAt(0).toUpperCase() + v.slice(1) + ' als Dauerauftrag</option>').join('') + '</select></label><p class="note full" id="f-rep-note" style="margin:0" hidden>Wird ab diesem Datum automatisch gebucht. Verpasste Termine bis heute werden nachgebucht.</p>') +
     '</div>' +
+    (d.type !== 'transfer' ? '<details class="more"' + (d.tax || d.warrantyUntil ? ' open' : '') + ' id="f-extra"><summary>Steuer und Garantie' + (d.tax ? ' · ' + esc(TAX[d.tax]) : '') + (d.warrantyUntil ? ' · Garantie' : '') + '</summary><div class="formgrid" style="margin-top:8px">' +
+      '<label class="field"><span>Für die Steuer</span><select class="input" id="f-tax"><option value="">–</option>' + Object.entries(TAX).map(([k, v]) => '<option value="' + k + '"' + (d.tax === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      '<label class="field"><span>Garantie bis</span><input class="input" type="date" id="f-warr" value="' + esc(d.warrantyUntil || '') + '"></label></div>' +
+      '<div class="chips" style="margin-top:8px"><button type="button" class="qchip" data-warr="24">+ 2 Jahre</button><button type="button" class="qchip" data-warr="36">+ 3 Jahre</button><button type="button" class="qchip" data-warr="0">keine</button></div></details>' : '') +
     (d.receipts && d.receipts.some(r => r.blobId) ? '<div class="field"><span>Beleg</span><div class="thumbs">' + d.receipts.filter(r => r.blobId).map(r => r.pdf ? '<a class="pdftile" data-blob-link="' + esc(r.blobId) + '" target="_blank" rel="noopener">PDF</a>' : '<img alt="Beleg" data-blob="' + esc(r.blobId) + '">').join('') + '</div></div>' : '') +
     (d.items && d.items.length ? '<details class="field"><summary>Artikel (' + d.items.length + ')</summary><div class="tablewrap"><table><tbody>' + d.items.map(i => '<tr><td style="white-space:normal">' + esc(i.n) + (i.q > 1 ? ' <span class="muted">×' + esc(String(i.q).replace('.', ',')) + '</span>' : '') + '</td><td class="muted">' + esc(i.g) + '</td><td class="r">' + money(i.t) + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
     (d.fx && d.fx.original ? '<p class="note" style="margin:0">Fremdwährung: ' + esc(d.fx.original) + (d.fx.markup ? ' · Kursaufschlag ' + esc(String(d.fx.markup).replace('.', ',')) + ' %' : '') + '</p>' : '') +
@@ -137,6 +141,7 @@ function mountEntryForm(root, draft, opts){
   });
   renderCatChips(); renderSugg(); renderCardChips(); renderDay();
   amountEl.addEventListener('input', renderImpact);
+  root.querySelectorAll('[data-warr]').forEach(b => b.addEventListener('click', () => { const m = Number(b.dataset.warr), w = $('#f-warr', root); if (!m) { w.value = ''; return; } const d0 = parseISO($('#f-date', root).value || today()); d0.setMonth(d0.getMonth() + m); w.value = isoOf(d0); }));
   const repEl = $('#f-rep', root);
   if (repEl) { const sr = () => { $('#f-rep-note', root).hidden = !repEl.value; }; repEl.addEventListener('change', sr); sr(); }
   form.querySelectorAll('input[name="ftype"]').forEach(r => r.addEventListener('change', syncType));
@@ -158,8 +163,9 @@ function mountEntryForm(root, draft, opts){
     const e = Object.assign({}, draft, {
       id:draft.id || newId(), type, amount:Math.abs(cents), date, cardId:$('#f-card', root).value || '', note:$('#f-note', root).value.trim()
     });
-    if (type === 'transfer') { e.toCardId = $('#f-to', root).value; e.catId = ''; e.merchant = ''; }
+    if (type === 'transfer') { e.toCardId = $('#f-to', root).value; e.catId = ''; e.merchant = ''; delete e.tax; delete e.warrantyUntil; }
     else { delete e.toCardId; e.catId = $('#f-cat', root).value; e.merchant = $('#f-merchant', root).value.trim(); }
+    if (type !== 'transfer') { const tx = $('#f-tax', root), wa = $('#f-warr', root); if (tx) { if (tx.value) e.tax = tx.value; else delete e.tax; } if (wa) { if (wa.value) e.warrantyUntil = wa.value; else delete e.warrantyUntil; } }
     if (e.example && e.note !== 'Beispiel') delete e.example;
     const rep = repEl ? repEl.value : '';
     try {
@@ -189,6 +195,22 @@ function mountEntryForm(root, draft, opts){
 const hasBank = e => !!(e.bankKeys && e.bankKeys.length);
 const hasBon = e => !!((e.receipts && e.receipts.length) || (e.items && e.items.length));
 function originTxt(e){ const t = []; if (hasBank(e)) t.push('Bank-PDF'); if (hasBon(e)) t.push('Bon'); if (!t.length) t.push(e.source === 'applepay' ? 'Apple Pay' : 'manuell'); return t.join(' + '); }
+const TAX = {wk:'Werbungskosten', sa:'Sonderausgaben', agb:'Außergewöhnliche Belastung', kb:'Kinderbetreuung'};
+function openTaxList(year){
+  const l = allEntries().filter(e => e.tax && e.date.startsWith(year)).sort((a, b) => a.date.localeCompare(b.date));
+  const sum = {}; for (const e of l) sum[e.tax] = (sum[e.tax] || 0) + (e.type === 'income' ? -e.amount : e.amount);
+  openSheet('Steuerbelege ' + year,
+    (l.length ? '<div class="facts">' + Object.keys(TAX).filter(k => sum[k]).map(k => '<div><span>' + TAX[k] + '</span><strong>' + money(sum[k]) + '</strong></div>').join('') + '</div>' +
+      '<div class="list">' + l.map(e => entryRow(e, true)).join('') + '</div><button class="btn primary" id="tx-csv" style="width:100%">Als CSV exportieren</button>' : '<div class="list"><div class="empty">Noch keine Belege für ' + year + ' markiert. Im Eintrag unter „Steuer und Garantie“ auswählen.</div></div>') +
+    '<p class="note" style="margin:0">Für die Arbeitnehmerveranlagung in FinanzOnline. Spenden und Kirchenbeitrag melden die Organisationen meist selbst ans Finanzamt. Belege aufbewahren – das Finanzamt kann sie anfordern; die Fotos liegen beim Eintrag und im Backup.</p>',
+    root => { const b = $('#tx-csv', root); if (b) b.onclick = () => { const rows = [['Datum', 'Art', 'Händler', 'Betrag', 'Notiz']].concat(l.map(e => [e.date, TAX[e.tax], e.merchant || '', ((e.type === 'income' ? -e.amount : e.amount) / 100).toFixed(2).replace('.', ','), e.note || ''])); deliverFile('steuerbelege-' + year + '.csv', '﻿' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(';')).join('\r\n'), 'text/csv'); }; });
+}
+function warrantyList(){ const t = today(); return allEntries().filter(e => e.warrantyUntil && e.warrantyUntil >= t).sort((a, b) => a.warrantyUntil.localeCompare(b.warrantyUntil)); }
+function openWarranties(){
+  const l = warrantyList();
+  openSheet('Garantien', (l.length ? '<div class="list">' + l.map(e => '<button class="row" data-act="edit" data-id="' + esc(e.id) + '">' + badge(catById(e.catId)) + '<span class="row-main"><span class="row-title">' + esc(e.merchant || catById(e.catId).name) + (e.note ? ' · ' + esc(e.note) : '') + '</span><span class="row-sub">gekauft ' + esc(DAYL.format(parseISO(e.date))) + ' · bis ' + esc(DAYL.format(parseISO(e.warrantyUntil))) + '</span></span><span class="row-amt">' + money(e.amount) + '<small>' + Math.max(0, dayDiff(e.warrantyUntil, today())) + ' Tage</small></span></button>').join('') + '</div>' : '<div class="list"><div class="empty">Keine laufenden Garantien. Im Eintrag unter „Steuer und Garantie“ eintragen; beim Scan schlägt die KI sie für Elektronik und Geräte vor.</div></div>') +
+    '<p class="note" style="margin:0">In der EU gilt beim Händler mindestens 2 Jahre Gewährleistung. Die Erinnerung erscheint 60 Tage vor Ablauf in der Übersicht.</p>');
+}
 function originHTML(e){
   const disc = entryDiscount(e);
   const chips = (hasBank(e) ? '<span class="chip ok">Bank-PDF</span>' : '') + (hasBon(e) ? '<span class="chip ok">Bon</span>' : '') + (!hasBank(e) && !hasBon(e) ? '<span class="chip info">' + esc(originTxt(e)) + '</span>' : '');
