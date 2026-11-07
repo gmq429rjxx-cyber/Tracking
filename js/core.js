@@ -1,6 +1,6 @@
 // Kassabuch – Hilfsfunktionen, Datenmodell, Speicher (IndexedDB), Beispieldaten
 'use strict';
-const APP_VERSION = '2026.11.06-15';
+const APP_VERSION = '2026.11.07-1';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);

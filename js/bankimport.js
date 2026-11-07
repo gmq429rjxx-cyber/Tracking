@@ -55,7 +55,7 @@ async function onBankFiles(files){
   if (!files.length) { toast('Keine neuen PDFs. ' + pre + ' schon importiert.'); return; }
   openSheet('Bank-PDFs lesen', '<div class="status"><span class="spinner" aria-hidden="true"></span><div><strong id="bk-st">Lese 0 von ' + files.length + ' …</strong><div class="note">Passiert nur auf diesem iPhone.</div></div></div>');
   let mod;
-  try { mod = await import('./bank.js'); } catch (e) { openSheet('Bank-PDFs', '<div class="panel"><h3>Leser nicht geladen</h3><p class="note" style="margin:0">Beim ersten Mal braucht der PDF-Leser Internet. Verbindung prüfen und erneut versuchen.</p></div>'); return; }
+  try { mod = await import(new URL('bank.js', document.baseURI).href); } catch (e) { openSheet('Bank-PDFs', '<div class="panel"><h3>Leser nicht geladen</h3><p class="note" style="margin:0">Beim ersten Mal braucht der PDF-Leser Internet. Verbindung prüfen und erneut versuchen.</p></div>'); return; }
   const parsed = [], failed = [];
   for (let i = 0; i < files.length; i++) {
     const st = $('#bk-st'); if (st) st.textContent = 'Lese ' + (i + 1) + ' von ' + files.length + ' …';

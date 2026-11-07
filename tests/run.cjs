@@ -129,6 +129,16 @@ async function addEntry({amount, merchant, cat, card}){
     await fresh(); const r = await page.evaluate(async () => { const m = await import('./bank.js'); return m.parseBank(['Revolut Bank UAB', 'Karteneinzahlungsbeleg', 'Betrag | €12.34', 'Transaktionsdatum | 01.10.2026, 10:00:00', 'Kartennummer | 400000 **** 1111', 'Status | ABGESCHLOSSEN', 'ID für Nachverfolgung/System | test-1', 'Name der Empfängerbank | MUSTERBANK AG'], 'x.pdf'); });
     ok(r.ok && r.kind === 'transfer' && r.amount === 1234 && r.date === '2026-10-01' && r.counterpartyCardLast4 === '1111', JSON.stringify(r));
   });
+  await test('Bank-Import über die Oberfläche: PDF-Leser lädt (auch aus js/)', async () => {
+    await fresh();
+    const pdf = (() => { const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>', null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+      const txt = 'BT /F1 12 Tf 20 150 Td (Testdokument ohne Bankformat) Tj ET'; objs[3] = '<< /Length ' + txt.length + ' >>\nstream\n' + txt + '\nendstream';
+      let out = '%PDF-1.4\n', offs = []; objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+      const x = out.length; out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
+      return Buffer.from(out, 'latin1'); })();
+    await page.setInputFiles('#bankInput', {name:'test.pdf', mimeType:'application/pdf', buffer:pdf}); await page.waitForTimeout(2500);
+    const t = await page.innerText('#sheetBody'); ok(!/Leser nicht geladen/.test(t), 'PDF-Leser nicht geladen'); ok(/nicht erkannt|Keine|nicht lesbar|Format/i.test(t), t.slice(0, 120));
+  });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
     await page.click('[data-act="examples-load"]'); for (const r of ['uebersicht', 'statistik', 'karten']) await go(r);
