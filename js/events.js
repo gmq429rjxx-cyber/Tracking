@@ -83,6 +83,7 @@ const ACTIONS = {
   'card-edit': t => openCard(t.dataset.id),
   'card-rec': t => openReconcile(t.dataset.id),
   'review': t => { try { localStorage.setItem('kb-review-seen', t.dataset.k); } catch (_) {} openReview(t.dataset.k); },
+  'filters-reset': t => showEntries({fCat:'', fCard:'', fPers:'', q:'', eDay:''}),
   'cat-entries': t => showEntries({fCat:t.dataset.cat, fCard:'', fPers:'', q:'', eDay:''}),
   'card-entries': t => showEntries({fCard:t.dataset.id, fCat:'', q:''}),
   'budget-edit': t => openBudget(t.dataset.cat),

@@ -120,6 +120,9 @@ async function addEntry({amount, merchant, cat, card}){
     ok((await page.evaluate(() => location.hash)) === '#eintraege', 'kein Wechsel zu Einträgen');
     ok((await page.$eval('#eCat', el => el.value)) === 'lebensmittel', 'Kategoriefilter fehlt');
     ok(await page.$$eval('#eList .swipe', l => l.length) === 1, 'falsche Einträge');
+    ok(/Gefiltert: Lebensmittel/.test(await page.innerText('#eReset')), 'Filterhinweis fehlt');
+    await page.click('[data-act="filters-reset"]'); await page.waitForTimeout(300);
+    ok(await page.$$eval('#eList .swipe', l => l.length) === 2 && (await page.$eval('#eCat', el => el.value)) === '' && await page.isHidden('#eReset'), 'Filter nicht zurückgesetzt');
     await go('budgets'); await page.click('#view .brow[data-cat="lebensmittel"]'); await page.waitForTimeout(400);
     ok(await page.isVisible('#sheet:not([hidden])'), 'Budget-Einstellung öffnet nicht');
   });

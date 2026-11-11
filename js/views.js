@@ -156,7 +156,7 @@ function budgetRow(r, act){
 function renderEntries(v){
   if (v.dataset.shell !== 'entries') {
     v.dataset.shell = 'entries';
-    v.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px"><div id="eMonth"></div><div class="seg" role="group" aria-label="Ansicht" id="eMode"><button type="button" data-mode="list">Liste</button><button type="button" data-mode="cal">Kalender</button></div><div class="toolbar"><input class="input" id="eSearch" type="search" placeholder="Suchen: Händler, Notiz, Betrag" autocomplete="off"><div class="filters"><select class="input" id="eCard" aria-label="Karte"></select><select class="input" id="eCat" aria-label="Kategorie"></select><select class="input" id="ePers" aria-label="Person"></select></div></div><div id="eSum" class="statgrid"></div><div id="eCal"></div><div id="eList"></div></div>';
+    v.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px"><div id="eMonth"></div><div class="seg" role="group" aria-label="Ansicht" id="eMode"><button type="button" data-mode="list">Liste</button><button type="button" data-mode="cal">Kalender</button></div><div class="toolbar"><input class="input" id="eSearch" type="search" placeholder="Suchen: Händler, Notiz, Betrag" autocomplete="off"><div class="filters"><select class="input" id="eCard" aria-label="Karte"></select><select class="input" id="eCat" aria-label="Kategorie"></select><select class="input" id="ePers" aria-label="Person"></select></div></div><div id="eReset" hidden></div><div id="eSum" class="statgrid"></div><div id="eCal"></div><div id="eList"></div></div>';
     const se = $('#eSearch'); se.value = S.q;
     se.addEventListener('input', () => { S.q = se.value; fillEntries(); });
     $('#eCard').addEventListener('change', ev => { S.fCard = ev.target.value; fillEntries(); });
@@ -198,6 +198,9 @@ function calendarHTML(list){
   return h + '</div><div class="callegend">' + lg + '<span><i style="--c:var(--warn);border-radius:50%"></i>Dauerauftrag fällig</span></div><p class="note" style="margin:2px 2px 0">Daueraufträge färben nicht. Tag antippen zum Filtern.</p></div>';
 }
 function fillEntries(){
+  /* Aktive Filter benennen und mit einem Tipp zurücksetzen */
+  { const act = [S.fCat ? catById(S.fCat).name : '', S.fCard ? ((cardById(S.fCard) || {}).name || '') : '', S.fPers ? (S.fPers === '__none' ? 'Ohne Person' : (personById(S.fPers) || {}).name || '') : '', S.q ? '„' + S.q + '“' : ''].filter(Boolean), box = $('#eReset');
+    if (box) { box.hidden = !act.length; box.innerHTML = act.length ? '<p class="note" style="margin:0;display:flex;justify-content:space-between;gap:12px;align-items:baseline"><span>Gefiltert: ' + esc(act.join(' · ')) + '</span><button class="linkbtn" data-act="filters-reset" style="flex:none">Filter zurücksetzen</button></p>' : ''; } }
   const q = S.q.trim().toLowerCase();
   let list = entriesIn(S.month);
   if (S.fCard) list = list.filter(e => S.fCard === '__none' ? !e.cardId : (e.cardId === S.fCard || e.toCardId === S.fCard));
