@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de-AT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kassabuch</title>
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://api.anthropic.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#F3F3F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C0C0E" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Kassabuch">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<script src="js/boot.js"></script>
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">Kassabuch<small id="modeLine">Wird geladen …</small></div>
+    <button class="iconbtn" data-act="settings" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </header>
+  <div id="banners"></div>
+  <main id="view"></main>
+</div>
+
+<div class="viewer" id="viewer" hidden><img alt="Beleg in voller Größe"></div>
+
+<div class="tabbar"><nav id="tabs" aria-label="Bereiche"></nav></div>
+
+<div class="sheet-wrap" id="sheet" hidden>
+  <div class="scrim" data-act="close-sheet"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h2 id="sheetTitle"></h2><button class="iconbtn" data-act="close-sheet" aria-label="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="sheetBody" style="display:flex;flex-direction:column;gap:14px"></div>
+  </div>
+</div>
+
+<input type="file" id="receiptInput" class="visually-hidden" multiple accept="image/*" tabindex="-1" aria-hidden="true">
+<input type="file" id="bankInput" class="visually-hidden" multiple accept="application/pdf,.pdf" tabindex="-1" aria-hidden="true">
+<input type="file" id="bankDirInput" class="visually-hidden" multiple webkitdirectory tabindex="-1" aria-hidden="true">
+<input type="file" id="inboxInput" class="visually-hidden" accept=".txt,.csv,text/plain" tabindex="-1" aria-hidden="true">
+<input type="file" id="jsonInput" class="visually-hidden" accept=".json,application/json" tabindex="-1" aria-hidden="true">
+<input type="file" id="csvInput" class="visually-hidden" accept=".csv,text/csv,text/plain" tabindex="-1" aria-hidden="true">
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script defer src="js/core.js"></script>
+<script defer src="js/motion.js"></script>
+<script defer src="js/data.js"></script>
+<script defer src="js/views.js"></script>
+<script defer src="js/sheets.js"></script>
+<script defer src="js/scan.js"></script>
+<script defer src="js/bankimport.js"></script>
+<script defer src="js/settings.js"></script>
+<script defer src="js/pdf.js"></script>
+<script defer src="js/events.js"></script>
+</body>
+</html>
