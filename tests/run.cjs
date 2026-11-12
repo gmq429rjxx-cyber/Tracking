@@ -298,6 +298,46 @@ async function addEntry({amount, merchant, cat, card}){
     const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].id === 'u1', 'Zurückholen: ' + JSON.stringify(d.entries.map(e => e.id)));
     await page.reload(); await page.waitForTimeout(700); ok((await page.evaluate(() => kvGet('snapshots'))).length === 1, 'zweite Sicherung ohne Versionswechsel');
   });
+  await test('Backup-Prüfung lässt saubere Daten unverändert', async () => {
+    await fresh(); await page.click('[data-act="examples-load"]'); await page.waitForTimeout(500); await loadPlan();
+    await seed(`(p, es) => { p.persons = [{id:'pa', name:'Person A', color:1}]; p.personAlias = {markt:['pa']}; p.goals = [{id:'g1', name:'Rücklage', target:100000, due:'2027-06', catId:'', cardId:'', start:0, startDate:'${today()}'}]; es.put({id:'k1', type:'expense', amount:1299, catId:'lebensmittel', date:'${today()}', merchant:'Markt', note:'', persons:['pa'], tax:'wk', warrantyUntil:'2027-01-01', bankKeys:['x'], receipts:[{blobId:'b1'}], items:[{n:'Brot', raw:'BROT', g:'Brot & Gebäck', q:1, t:299, k:'item'}, {n:'Alt', t:-50}], ai:{status:'warn', findings:['Datum fehlt']}}); }`);
+    const r = await page.evaluate(() => { const canon = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(x => [x, v[x]])) : v);
+      const diff = allEntries().filter(e => canon(cleanBackupEntry(e)) !== canon(e)).map(e => e.id);
+      return {n:allEntries().length, diff, prof:canon(cleanBackupProfile(S.profile)) === canon(normalizeProfile(S.profile))}; });
+    ok(r.n > 20 && !r.diff.length, 'Einträge verändert: ' + r.diff.slice(0, 5).join()); ok(r.prof, 'Einstellungen verändert');
+  });
+  await test('Backup-Prüfung: präparierte Datei richtet nichts an', async () => {
+    await fresh();
+    const P = '"><img src=x onerror="window.__xss=1"><i class="inj"></i>';
+    const bad = {app:'Kassabuch', version:2, profile:{categories:[{id:'lebensmittel', name:'Essen', kind:'expense', color:'rot'}, {id:5, name:'kaputt'}, 'x'], cards:[{id:'c1', name:'Karte', kind:P, color:{}, last4:1234}], persons:[{id:'p1', name:'P', color:'x'}, null], recurring:[{id:'r1', amount:'viel'}], budgets:{lebensmittel:'abc', __proto__:{x:1}}, personAlias:{a:'kein Array'}, groups:'nein', totalBudget:'x'},
+      entries:[{id:'h1', type:'expense', amount:1000.4, catId:'lebensmittel', cardId:'c1', date:'${today()}', merchant:{a:1}, persons:'p1', tax:P, items:'x', receipts:[{blobId:'hb', pdf:true}], ai:{status:P, findings:[P, 5]}}, {id:'h2', type:P, amount:5, date:'${today()}'}, {id:'h3', type:'expense', amount:'5', date:'${today()}'}, null],
+      blobs:{hb:'data:text/html;base64,' + Buffer.from('<script>window.x=1</scr' + 'ipt>').toString('base64')}};
+    const f = path.join(require('os').tmpdir(), 'kb-bad.json'); fs.writeFileSync(f, JSON.stringify(bad).replace(/\$\{today\(\)\}/g, today()));
+    await page.setInputFiles('#jsonInput', f); await page.waitForSelector('#r-go'); ok(/3 fehlerhafte Einträge werden übersprungen/.test(await page.innerText('#sheetBody')), 'kein Hinweis: ' + (await page.innerText('#sheetBody')).slice(0, 200));
+    await page.click('#r-go'); await page.waitForTimeout(500);
+    const d = await page.evaluate(async () => { const e = S.entries.get('h1'), b = await tx('blobs', 'readonly', s => s.get('hb')); return {n:allEntries().length, amount:e.amount, merchant:e.merchant, persons:e.persons, tax:e.tax, items:e.items, st:e.ai.status, f:e.ai.findings.length, blob:b && b.type, cat:S.profile.categories.length, color:S.profile.categories[0].color, kind:S.profile.cards[0].kind, l4:S.profile.cards[0].last4, pers:S.profile.persons.length, rec:S.profile.recurring.length, bud:Object.keys(S.profile.budgets).length, tb:S.profile.totalBudget}; });
+    ok(d.n === 1 && d.amount === 1000 && d.merchant === undefined && d.persons.length === 0 && d.tax === undefined && d.items.length === 0 && d.st === undefined && d.f === 1, 'Eintrag: ' + JSON.stringify(d));
+    ok(d.blob === 'application/octet-stream', 'Dateityp: ' + d.blob); ok(d.cat === 1 && d.color === 0 && d.kind === 'debit' && d.l4 === '1234' && d.pers === 1 && d.rec === 0 && d.bud === 0 && d.tb === null, 'Einstellungen: ' + JSON.stringify(d));
+    for (const r of ['uebersicht', 'eintraege', 'budgets', 'karten', 'statistik', 'fixkosten']) await go(r);
+    await go('eintraege'); await page.click('#eList .row[data-act="edit"][data-id="h1"]'); await page.waitForTimeout(400);
+    ok(!(await page.$('.inj')) && !(await page.evaluate(() => window.__xss)), 'Einschleusung im Eintrag');
+    ok((await page.evaluate(() => buildReport({kind:'month', month:S.month, sec:{sum:1, cats:1, budget:1, pers:1, list:1}}).pages)) >= 1, 'PDF-Bericht');
+  });
+  await test('Prüfstatus aus gespeicherten Daten wird nur in bekannter Form angezeigt', async () => {
+    await fresh();
+    await seed(`(p, es) => { es.put({id:'s9', type:'expense', amount:100, catId:'lebensmittel', date:'${today()}', merchant:'M', source:'scan', ai:{status:'"><i class="inj"></i>', findings:[]}}); }`);
+    await go('eintraege'); await page.click('#eList .row[data-act="edit"][data-id="s9"]'); await page.waitForTimeout(400);
+    ok(!(await page.$('.inj')), 'Status ungefiltert angezeigt'); ok(await page.evaluate(() => verdictChip('bad').includes('n.i.O.') && verdictChip('constructor') === ''), 'verdictChip');
+  });
+  await test('CSV: Text mit Formelzeichen wird entschärft, Zahlen bleiben Zahlen', async () => {
+    await fresh();
+    const r = await page.evaluate(() => [csvCell('=1+1'), csvCell('+43 660'), csvCell('@x'), csvCell('-12,30'), csvCell('12.5'), csvCell('Markt; Süd'), csvCell('Lidl'), csvCell(null), csvCell('-Rabatt')]);
+    ok(JSON.stringify(r) === JSON.stringify(["'=1+1", "'+43 660", "'@x", '-12,30', '12.5', '"Markt; Süd"', 'Lidl', '', "'-Rabatt"]), JSON.stringify(r));
+  });
+  await test('Beleg-Scan sendet keine Einnahme-Kategorien mit', async () => {
+    await fresh(); const t = await page.evaluate(() => scanPrompt());
+    ok(/lebensmittel = /.test(t) && !/gehalt = /i.test(t) && !/Einnahme\)/.test(t), 'Kategorienliste im Prompt');
+  });
   await test('Mehrere Belege: Warteschlange, Überspringen, Zähler', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
     await go('uebersicht'); const f = n => ({name:'bon' + n + '.png', mimeType:'image/png', buffer:TINY_PNG});

@@ -114,7 +114,16 @@ async function blobStats(){
   return {n, bytes, ids};
 }
 const blobToData = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
-function dataToBlob(u){ const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(u || ''); if (!m) return null; const raw = m[2] ? atob(m[3]) : decodeURIComponent(m[3]); const a = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i); return new Blob([a], {type:m[1] || 'application/octet-stream'}); }
+/* CSV-Zelle: Trennzeichen und Anführungszeichen maskieren; Text, der mit = + - @ beginnt, bekommt ein Hochkomma,
+   damit Excel ihn nicht als Formel ausführt (Zahlen wie -12,30 bleiben unverändert) */
+function csvCell(v){
+  let s = String(v == null ? '' : v);
+  if (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(?:[.,]\d+)?$/.test(s)) s = "'" + s;
+  return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+/* Belege aus einem Backup: nur Bilder und PDFs behalten ihren Typ, alles andere wird als reine Datei abgelegt (kann dann nicht als Seite geöffnet werden) */
+const BLOB_OK = /^(?:image\/(?:jpeg|png|webp|gif|heic|heif)|application\/pdf)$/i;
+function dataToBlob(u){ const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(u || ''); if (!m) return null; if (!BLOB_OK.test(m[1])) m[1] = 'application/octet-stream'; const raw = m[2] ? atob(m[3]) : decodeURIComponent(m[3]); const a = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) a[i] = raw.charCodeAt(i); return new Blob([a], {type:m[1] || 'application/octet-stream'}); }
 async function exportData(kind, opt){
   const list = allEntries().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const stamp = today();
@@ -126,7 +135,7 @@ async function exportData(kind, opt){
     else done(await deliverFile('kassabuch-backup-' + stamp + '.json', json, 'application/json'));
     return;
   }
-  const q = v => { const s = String(v == null ? '' : v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const q = csvCell;
   const rows = [['ID','Datum','Typ','Betrag','Kategorie','Karte','Händler','Notiz','Personen']].concat(list.map(e => [txId(e), e.date, isWithdrawal(e) ? 'Entnahme' : e.type === 'income' ? 'Einnahme' : e.type === 'transfer' ? 'Umbuchung' : 'Ausgabe', (e.amount / 100).toFixed(2).replace('.', ','), e.type === 'transfer' ? '' : catById(e.catId).name, ((cardById(e.cardId) || {}).name || '') + (e.type === 'transfer' ? ' → ' + ((cardById(e.toCardId) || {}).name || '') : ''), e.merchant || '', e.note || '', personNames(e).join(', ')]));
   await deliverFile('kassabuch-' + stamp + '.csv', '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n'), 'text/csv');
 }
@@ -207,6 +216,44 @@ function openBackupUnlock(d, name){
       });
     });
 }
+/* ---------- Backup prüfen: nur bekannte Formen übernehmen. Kaputtes wird repariert oder übersprungen, Unbekanntes bleibt unverändert. ---------- */
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const isStr = v => typeof v === 'string';
+const colorNo = v => { const n = Number(v); return Number.isFinite(n) ? Math.abs(Math.round(n)) % 20 : 0; };
+const strList = v => Array.isArray(v) ? v.filter(isStr) : [];
+function cleanBackupEntry(e){
+  if (!e || typeof e !== 'object' || !isStr(e.id) || !e.id || e.id.length > 200 || !validISO(e.date) || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || !['expense', 'income', 'transfer'].includes(e.type)) return null;
+  const o = clean(e); o.amount = Math.round(o.amount);
+  for (const k of ['merchant', 'merchantRaw', 'note', 'catId', 'cardId', 'toCardId', 'recurringId', 'receiptNo', 'receiptHash', 'importKey', 'source', 'currency']) if (o[k] != null && !isStr(o[k])) delete o[k];
+  if (o.tax != null && !(isStr(o.tax) && hasOwn(TAX, o.tax))) delete o.tax;
+  for (const k of ['warrantyUntil', 'dueDate']) if (o[k] != null && o[k] !== '' && !validISO(o[k])) delete o[k];
+  for (const k of ['persons', 'bankKeys']) if (o[k] != null) o[k] = strList(o[k]);
+  if (o.items != null) o.items = (Array.isArray(o.items) ? o.items : []).filter(i => i && typeof i === 'object' && isStr(i.n) && Number.isFinite(i.t)).map(i => { if (i.raw != null && !isStr(i.raw)) delete i.raw; if (i.g != null && !isStr(i.g)) delete i.g; if (i.q != null && !(Number.isFinite(i.q) && i.q > 0)) i.q = 1; if (i.k != null && !['item', 'discount', 'deposit'].includes(i.k)) delete i.k; return i; });
+  if (o.receipts != null) o.receipts = (Array.isArray(o.receipts) ? o.receipts : []).filter(r => r && typeof r === 'object' && isStr(r.blobId) && r.blobId);
+  if (o.ai != null) {
+    if (typeof o.ai !== 'object' || Array.isArray(o.ai)) delete o.ai;
+    else { if (!(isStr(o.ai.status) && hasOwn(VERDICT, o.ai.status))) delete o.ai.status; if (o.ai.findings != null) o.ai.findings = strList(o.ai.findings).slice(0, 30).map(f => f.slice(0, 400)); }
+  }
+  return o;
+}
+function cleanBackupProfile(raw){
+  const p = normalizeProfile(raw);
+  const named = l => (Array.isArray(l) ? l : []).filter(x => x && typeof x === 'object' && isStr(x.id) && x.id && isStr(x.name));
+  const map = (m, ok) => Object.fromEntries(Object.entries(m && typeof m === 'object' && !Array.isArray(m) ? m : {}).filter(([k, v]) => k !== '__proto__' && ok(v)));
+  p.categories = named(p.categories).map(c => Object.assign(c, {kind:c.kind === 'income' ? 'income' : 'expense', color:colorNo(c.color)}, c.group != null && !isStr(c.group) ? {group:''} : {}));
+  if (!p.categories.length) p.categories = clean(DEFAULT_CATS);
+  p.cards = named(p.cards).map(c => Object.assign(c, {kind:hasOwn(KIND, c.kind) ? c.kind : 'debit', color:colorNo(c.color)}, c.last4 == null ? {} : {last4:isStr(c.last4) || typeof c.last4 === 'number' ? String(c.last4).slice(0, 8) : ''}));
+  if (p.persons != null) p.persons = named(p.persons).map(x => Object.assign(x, {color:colorNo(x.color)}));
+  if (p.goals != null) p.goals = named(p.goals).filter(g => Number.isFinite(g.target));
+  p.recurring = p.recurring.filter(r => r && typeof r === 'object' && isStr(r.id) && r.id && Number.isFinite(r.amount) && validISO(r.startDate) && (r.type == null || ['expense', 'income', 'transfer'].includes(r.type))).map(r => Object.assign(r, {freq:hasOwn(FREQ, r.freq) ? r.freq : 'monthly'}));
+  for (const k of ['budgets', 'yearBudgets']) if (p[k] != null) p[k] = map(p[k], Number.isFinite);
+  for (const k of ['bankMap', 'ibanMap', 'walletMap', 'merchantAlias']) if (p[k] != null) p[k] = map(p[k], isStr);
+  if (p.personAlias != null) p.personAlias = map(p.personAlias, Array.isArray);
+  for (const k of ['groups', 'ignoredImports', 'exampleBudgetKeys']) if (p[k] != null) p[k] = strList(p[k]);
+  for (const k of ['totalBudget', 'plannedIncome']) if (p[k] != null && !Number.isFinite(p[k])) p[k] = null;
+  if (p.planNote != null && !isStr(p.planNote)) p.planNote = '';
+  return p;
+}
 async function onJsonFile(file){
   let d;
   try { d = JSON.parse(await readText(file)); } catch (_) { toast('Datei ist kein gültiges Backup.'); return; }
@@ -216,13 +263,13 @@ function loadJson(d, fileName){
   const file = {name:fileName};
   if (d && d.app === 'Kassabuch' && d.kind === 'encrypted' && d.kdf && d.iv && d.data) { openBackupUnlock(d, fileName); return; }
   if (d && d.app === 'Kassabuch' && d.kind === 'plan' && Array.isArray(d.categories)) { openPlan(d, file.name); return; }
-  if (!d || d.app !== 'Kassabuch' || !Array.isArray(d.entries) || !d.profile) { toast('Datei ist kein Kassabuch-Backup.'); return; }
-  const incoming = d.entries.filter(e => e && e.id && validISO(e.date) && typeof e.amount === 'number');
+  if (!d || d.app !== 'Kassabuch' || !Array.isArray(d.entries) || !d.profile || typeof d.profile !== 'object') { toast('Datei ist kein Kassabuch-Backup.'); return; }
+  const incoming = d.entries.map(cleanBackupEntry).filter(Boolean), bad = d.entries.length - incoming.length;
   const fresh = incoming.filter(e => !S.entries.has(e.id)), blobs = d.blobs && typeof d.blobs === 'object' ? d.blobs : null;
   const emptyHere = !allEntries().some(e => !e.example) && !S.profile.cards.some(c => !c.example);
-  openSheet('Backup laden', '<p class="note" style="margin:0">' + esc(file.name) + '<br>' + incoming.length + ' Einträge, davon ' + fresh.length + ' neu' + (blobs ? ', ' + Object.keys(blobs).length + ' Belegfotos' : ', ohne Belegfotos') + '. ' + (emptyHere ? 'Dieses Gerät ist leer: alle Einstellungen werden übernommen.' : 'Karten, Kategorien, Budgets, Daueraufträge und Ziele werden ergänzt, Vorhandenes bleibt.') + '</p>' + (blobs ? '' : '<p class="note" style="margin:0">Dieses Backup enthält keine Belegfotos. Buchungen und Artikel bleiben vollständig.</p>') + '<button class="btn primary" id="r-go"' + (fresh.length || !S.entries.size ? '' : ' disabled') + '>Zusammenführen</button>', root => {
+  openSheet('Backup laden', '<p class="note" style="margin:0">' + esc(file.name) + '<br>' + incoming.length + ' Einträge, davon ' + fresh.length + ' neu' + (blobs ? ', ' + Object.keys(blobs).length + ' Belegfotos' : ', ohne Belegfotos') + '. ' + (bad ? bad + (bad === 1 ? ' fehlerhafter Eintrag wird' : ' fehlerhafte Einträge werden') + ' übersprungen. ' : '') + (emptyHere ? 'Dieses Gerät ist leer: alle Einstellungen werden übernommen.' : 'Karten, Kategorien, Budgets, Daueraufträge und Ziele werden ergänzt, Vorhandenes bleibt.') + '</p>' + (blobs ? '' : '<p class="note" style="margin:0">Dieses Backup enthält keine Belegfotos. Buchungen und Artikel bleiben vollständig.</p>') + '<button class="btn primary" id="r-go"' + (fresh.length || !S.entries.size ? '' : ' disabled') + '>Zusammenführen</button>', root => {
     $('#r-go', root).onclick = async () => {
-      const q = normalizeProfile(d.profile); let p;
+      const q = cleanBackupProfile(d.profile); let p;
       if (emptyHere) p = q;
       else {
         p = clean(S.profile);

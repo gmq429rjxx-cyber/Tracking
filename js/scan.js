@@ -25,7 +25,8 @@ function findMergeTarget(amount, date, type){
     .sort((a, b) => Math.abs(dayDiff(a.date, date)) - Math.abs(dayDiff(b.date, date)))[0] || null;
 }
 function scanPrompt(){
-  const list = cats().map(c => c.id + ' = ' + c.name + ' (' + (c.kind === 'income' ? 'Einnahme' : 'Ausgabe') + ')').join('\n');
+  /* nur Ausgaben-Kategorien mitsenden: Einnahme-Kategorien tragen oft Namen und werden für Belege nicht gebraucht */
+  const list = cats().filter(c => c.kind === 'expense').map(c => c.id + ' = ' + c.name).join('\n');
   return 'You are reading ONE receipt or invoice, given as photos or a PDF (usually Austrian or German; several photos are consecutive pages). Today is ' + today() + '.\n' +
     'Read only what is printed. Do not invent values; use null when something is unreadable.\n' +
     'Reply with only one JSON object of exactly this shape:\n' +
@@ -51,7 +52,8 @@ function netRate(sum, total, vat, n){
   return null;
 }
 const VERDICT = {ok:'i.O.', warn:'Prüfen', bad:'n.i.O.'};
-const verdictChip = st => '<span class="chip ' + st + '">' + VERDICT[st] + '</span>';
+/* nur die drei bekannten Zustände anzeigen: der Wert kann aus einer Backup-Datei stammen */
+const verdictChip = st => Object.prototype.hasOwnProperty.call(VERDICT, st) ? '<span class="chip ' + st + '">' + VERDICT[st] + '</span>' : '';
 function matchCard(r){
   const l4 = String(r.cardLast4 || '').replace(/\D/g, '').slice(-4);
   if (l4.length === 4) { const c = S.profile.cards.find(x => x.last4 === l4); if (c) return {id:c.id, how:'last4'}; return {id:'', how:'unknown', l4}; }

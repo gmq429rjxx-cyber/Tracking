@@ -121,7 +121,7 @@ function buildReport(o){
     if (!rows.length) { doc.text(M, y, 'Keine Ausgaben im Zeitraum.', {size:9, color:PDF_C.muted}); y += 14; }
     for (const [id, v] of rows) {
       need(17); const c = catById(id);
-      doc.rect(M, y - 7, 7, 7, PDF_CAT[(c.color || 0) % 20]);
+      doc.rect(M, y - 7, 7, 7, PDF_CAT[(Number(c.color) || 0) % 20] || PDF_C.bar);
       doc.text(M + 13, y, c.name + (c.saving ? ' (Sparen)' : ''), {size:9.5, maxW:170});
       doc.rect(M + 200, y - 7, 190, 7, PDF_C.soft); doc.rect(M + 200, y - 7, Math.max(1, 190 * v / max), 7, c.saving ? PDF_C.sav : PDF_C.bar);
       doc.text(R - 42, y, money(v), {size:9.5, bold:true, align:'right'});
