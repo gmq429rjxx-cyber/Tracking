@@ -148,6 +148,24 @@ async function addEntry({amount, merchant, cat, card}){
     ok(r.a === '20 % USt' && r.b === '10 % USt' && r.c === null && r.d === 'USt', 'netRate: ' + JSON.stringify(r));
     ok(r.n1.status === 'ok' && r.n1.findings.length === 0, 'Neubewertung: ' + JSON.stringify(r.n1)); ok(r.n2 === 'bad', 'echter Fehler bleibt');
   });
+  await test('Einträge: Pillen filtern nach Ausgaben, Einnahmen, Umbuchungen', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.cards = [{id:'ca', name:'Konto', kind:'account', color:1}, {id:'cb', name:'Bar', kind:'cash', color:2}]; es.put({id:'t1', type:'expense', amount:1000, catId:'lebensmittel', cardId:'ca', date:'${today()}', merchant:'Markt'}); es.put({id:'t2', type:'income', amount:5000, catId:'gehalt', cardId:'ca', date:'${today()}', merchant:'Arbeit'}); es.put({id:'t3', type:'transfer', amount:2000, cardId:'ca', toCardId:'cb', date:'${today()}'}); }`);
+    await go('eintraege'); const rows = () => page.$$eval('#eList .swipe', l => l.length), on = () => page.$eval('#eType [aria-pressed="true"]', b => b.textContent);
+    ok(await rows() === 3 && await on() === 'Alle', 'Start: ' + await rows());
+    await page.click('#eType [data-type="income"]'); ok(await rows() === 1 && await on() === 'Einnahmen' && await page.$('#eList [data-id="t2"]'), 'Einnahmen');
+    await page.click('#eType [data-type="transfer"]'); ok(await rows() === 1 && await page.$('#eList [data-id="t3"]'), 'Umbuchungen');
+    await page.click('#eType [data-type="expense"]'); ok(await rows() === 1 && await page.$('#eList [data-id="t1"]'), 'Ausgaben');
+    await page.fill('#eSearch', 'Markt'); await page.waitForTimeout(300); await page.click('[data-act="filters-reset"]'); await page.waitForTimeout(300);
+    ok(await rows() === 3 && await on() === 'Alle', 'Zurücksetzen lässt Art-Filter stehen');
+    ok(await page.evaluate(() => { const p = document.getElementById('eType'); return p.scrollWidth <= p.clientWidth + 1; }), 'Pillen passen nicht in die Breite');
+  });
+  await test('Fixkosten: nächste Abbuchungen mit Datumsblock', async () => {
+    await fresh();
+    await seed(`(p, es) => { const d = addDays(today(), 3); p.recurring = [{id:'r1', type:'expense', amount:1999, catId:'abos', cardId:'', toCardId:null, merchant:'Musikdienst', note:'', freq:'monthly', day:parseISO(d).getDate(), startDate:d, lastBooked:null, endDate:null, active:true}]; }`);
+    await go('fixkosten'); const b = await page.innerText('#view .row .dblock'), due = await page.evaluate(() => parseISO(addDays(today(), 3)).getDate());
+    ok(b.replace(/\s+/g, ' ').startsWith(String(due) + ' '), 'Datumsblock: ' + b); ok(/Musikdienst/.test(await page.innerText('#view .row:has(.dblock)')), 'Zeile');
+  });
   await test('Plan gegen Ist: Einnahmen-Fortschritt, Bleibt aktuell, Einkommen änderbar', async () => {
     await fresh(); await loadPlan();
     await seed(`(p, es) => { es.put({id:'i1', type:'income', amount:100000, catId:'gehalt', date:'${today()}', merchant:'Arbeit'}); es.put({id:'x1', type:'expense', amount:30000, catId:'lebensmittel', date:'${today()}', merchant:'Markt'}); }`);

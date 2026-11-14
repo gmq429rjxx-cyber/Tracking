@@ -133,6 +133,9 @@ async function bookDue(silent){
   } catch (e) { toast(writeErr(e)); return 0; }
   finally { booking = false; }
 }
+/* Datumsblock vor einer Zeile: Tag groß, Monat klein; das volle Datum steht für Vorlesefunktionen daneben */
+const WDAY = new Intl.DateTimeFormat('de-AT', {weekday:'long'});
+function dateBlock(iso){ const d = parseISO(iso); return '<span class="dblock" aria-hidden="true"><b>' + d.getDate() + '</b><i>' + esc(MON_S.format(d).replace('.', '')) + '</i></span><span class="visually-hidden">' + esc(DAYL.format(d)) + '</span>'; }
 function ruleTitle(r){ return r.merchant || r.note || (r.type === 'transfer' ? 'Umbuchung' : catById(r.catId).name); }
 function ruleSub(r){
   const when = r.freq === 'weekly' ? 'wöchentlich' : FREQ[r.freq] + ' am ' + (r.day || parseISO(r.startDate).getDate()) + '.';
@@ -198,7 +201,7 @@ function viewFixed(){
   for (const r of rules) if (isActive(r)) for (const d of occurrences(r, addDays(today(), 1), addDays(today(), 30))) up.push({r, d});
   up.sort((a, b) => a.d.localeCompare(b.d));
   h += '<section class="block"><div class="block-head"><h2>Nächste 30 Tage</h2><span class="note">' + money(up.filter(x => x.r.type === 'expense').reduce((a, x) => a + x.r.amount, 0)) + ' ab</span></div>';
-  h += up.length ? '<div class="list">' + up.slice(0, 12).map(({r, d}) => '<button class="row" data-act="rec-edit" data-id="' + esc(r.id) + '">' + badge(r.type === 'transfer' ? TRANSFER_CAT : catById(r.catId)) + '<span class="row-main"><span class="row-title">' + esc(ruleTitle(r)) + '</span><span class="row-sub">' + esc(DAY.format(parseISO(d))) + '</span></span><span class="row-end"><span class="row-amt ' + (r.type === 'income' ? 'pos' : '') + '">' + (r.type === 'income' ? '+ ' : r.type === 'transfer' ? '' : '− ') + money(r.amount) + '</span><span class="reldays">' + esc(relDays(d)) + '</span></span></button>').join('') + '</div>' : '<div class="list"><div class="empty">Keine Abbuchungen in den nächsten 30 Tagen.</div></div>';
+  h += up.length ? '<div class="list">' + up.slice(0, 12).map(({r, d}) => '<button class="row" data-act="rec-edit" data-id="' + esc(r.id) + '">' + dateBlock(d) + '<span class="row-main"><span class="row-title">' + esc(ruleTitle(r)) + '</span><span class="row-sub">' + esc(WDAY.format(parseISO(d)) + ' · ' + (r.type === 'transfer' ? 'Umbuchung' : catById(r.catId).name)) + '</span></span><span class="row-end"><span class="row-amt ' + (r.type === 'income' ? 'pos' : '') + '">' + (r.type === 'income' ? '+ ' : r.type === 'transfer' ? '' : '− ') + money(r.amount) + '</span><span class="reldays">' + esc(relDays(d)) + '</span></span></button>').join('') + '</div>' : '<div class="list"><div class="empty">Keine Abbuchungen in den nächsten 30 Tagen.</div></div>';
   h += '</section>';
   const order = {expense:0, transfer:1, income:2};
   rules.sort((a, b) => (isActive(b) - isActive(a)) || order[a.type] - order[b.type] || b.amount * (FREQ_PER_MONTH[b.freq] || 1) - a.amount * (FREQ_PER_MONTH[a.freq] || 1));

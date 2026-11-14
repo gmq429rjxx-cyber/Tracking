@@ -156,12 +156,13 @@ function budgetRow(r, act){
 function renderEntries(v){
   if (v.dataset.shell !== 'entries') {
     v.dataset.shell = 'entries';
-    v.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px"><div id="eMonth"></div><div class="seg" role="group" aria-label="Ansicht" id="eMode"><button type="button" data-mode="list">Liste</button><button type="button" data-mode="cal">Kalender</button></div><div class="toolbar"><input class="input" id="eSearch" type="search" placeholder="Suchen: Händler, Notiz, Betrag" autocomplete="off"><div class="filters"><select class="input" id="eCard" aria-label="Karte"></select><select class="input" id="eCat" aria-label="Kategorie"></select><select class="input" id="ePers" aria-label="Person"></select></div></div><div id="eReset" hidden></div><div id="eSum" class="statgrid"></div><div id="eCal"></div><div id="eList"></div></div>';
+    v.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px"><div id="eMonth"></div><div class="seg" role="group" aria-label="Ansicht" id="eMode"><button type="button" data-mode="list">Liste</button><button type="button" data-mode="cal">Kalender</button></div><div class="pills" role="group" aria-label="Art" id="eType">' + [['', 'Alle'], ['expense', 'Ausgaben'], ['income', 'Einnahmen'], ['transfer', 'Umbuchungen']].map(([k, t]) => '<button type="button" data-type="' + k + '">' + t + '</button>').join('') + '</div><div class="toolbar"><input class="input" id="eSearch" type="search" placeholder="Suchen: Händler, Notiz, Betrag" autocomplete="off"><div class="filters"><select class="input" id="eCard" aria-label="Karte"></select><select class="input" id="eCat" aria-label="Kategorie"></select><select class="input" id="ePers" aria-label="Person"></select></div></div><div id="eReset" hidden></div><div id="eSum" class="statgrid"></div><div id="eCal"></div><div id="eList"></div></div>';
     const se = $('#eSearch'); se.value = S.q;
     se.addEventListener('input', () => { S.q = se.value; fillEntries(); });
     $('#eCard').addEventListener('change', ev => { S.fCard = ev.target.value; fillEntries(); });
     $('#eCat').addEventListener('change', ev => { S.fCat = ev.target.value; fillEntries(); });
     $('#ePers').addEventListener('change', ev => { S.fPers = ev.target.value; fillEntries(); });
+    $('#eType').addEventListener('click', ev => { const b = ev.target.closest('[data-type]'); if (!b) return; S.fType = b.dataset.type; S.eDay = ''; fillEntries(); });
     $('#eMode').addEventListener('click', ev => { const b = ev.target.closest('[data-mode]'); if (!b) return; S.eMode = b.dataset.mode; S.eDay = ''; try { localStorage.setItem('kb-emode', S.eMode); } catch (_) {} fillEntries(); });
     $('#eCal').addEventListener('click', ev => { const b = ev.target.closest('[data-day]'); if (!b) return; S.eDay = S.eDay === b.dataset.day ? '' : b.dataset.day; fillEntries(); });
   }
@@ -205,6 +206,7 @@ function fillEntries(){
   let list = entriesIn(S.month);
   if (S.fCard) list = list.filter(e => S.fCard === '__none' ? !e.cardId : (e.cardId === S.fCard || e.toCardId === S.fCard));
   if (S.fCat) list = list.filter(e => e.catId === S.fCat);
+  if (S.fType) list = list.filter(e => e.type === S.fType);
   if (S.fPers) list = list.filter(e => S.fPers === '__none' ? e.type !== 'transfer' && !(e.persons || []).some(personById) : (e.persons || []).includes(S.fPers));
   if (q) list = list.filter(e => [e.merchant, e.note, e.type === 'transfer' ? 'Umbuchung' : catById(e.catId).name, (cardById(e.cardId) || {}).name, (cardById(e.toCardId) || {}).name, money(e.amount), txId(e)].join(' ').toLowerCase().includes(q));
   /* Personenfilter: Summen und Beträge nur mit dem Anteil dieser Person (gleichmäßig aufgeteilt) */
@@ -213,6 +215,7 @@ function fillEntries(){
   list.sort(byDateDesc);
   if (!S.eMode) { try { S.eMode = localStorage.getItem('kb-emode') || 'list'; } catch (_) { S.eMode = 'list'; } }
   $('#eMode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === S.eMode)));
+  $('#eType').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.type === (S.fType || ''))));
   if (S.eMode === 'cal') {
     $('#eCal').innerHTML = calendarHTML(list);
     if (S.eDay && !S.eDay.startsWith(S.month)) S.eDay = '';

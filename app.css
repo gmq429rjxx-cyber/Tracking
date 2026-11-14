@@ -157,7 +157,7 @@ section.block{display:flex;flex-direction:column;gap:10px}
 .formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .formgrid .full{grid-column:1/-1}
 .sheet-wrap{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center}
-.scrim{position:absolute;inset:0;background:var(--scrim)}
+.scrim{position:absolute;inset:0;background:var(--scrim);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .sheet{position:relative;width:100%;max-width:560px;max-height:92%;overflow:auto;overscroll-behavior:contain;background:var(--bg);border-radius:22px 22px 0 0;will-change:transform;padding:6px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
 .sheet-wrap.closing{pointer-events:none}
 .sheet-grip{touch-action:none}
@@ -290,7 +290,7 @@ button,.btn,.qchip,.tab,.row,.brow,.linkbtn,label{-webkit-user-select:none;user-
 input[type=checkbox][switch]{accent-color:var(--ok);width:auto;height:auto}
 .scrim{transition:none}
 @media (prefers-reduced-motion: reduce){.btn,.qchip,.tab,.row,.brow{transition:none}.btn:active,.qchip:active,.tab:active{transform:none}}
-@media (prefers-reduced-transparency: reduce){.tabbar{background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media (prefers-reduced-transparency: reduce){.tabbar{background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none} .scrim{-webkit-backdrop-filter:none;backdrop-filter:none}}
 .iconbtn{transition:transform .14s cubic-bezier(.2,.8,.2,1)}.iconbtn:active{transform:scale(.9)}
 
 /* Datumsfelder: eigene Anzeige, natives Feld unsichtbar darüber (öffnet den iOS-Auswähler) */
@@ -339,3 +339,13 @@ input[type=checkbox][switch]{accent-color:var(--ok);width:auto;height:auto}
 /* Einheitlicher Abstand unter dem Monatskopf in allen Tabs */
 #view>.monthbar{margin-bottom:14px}
 .findings{flex-basis:100%;margin:2px 0 0;padding-left:18px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+/* Filter als Pillen: aktive Pille gefüllt, bei wenig Platz seitlich wischbar */
+.pills{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px}
+.pills::-webkit-scrollbar{display:none}
+.pills button{flex:1 0 auto;min-height:36px;padding:0 9px;border:0;border-radius:999px;background:var(--surface-2);color:var(--muted);font-weight:600;font-size:13px;white-space:nowrap}
+.pills button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.pills button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Datumsblock vor Zeilen mit Fälligkeit */
+.dblock{width:36px;height:40px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;background:var(--surface-2);line-height:1.05}
+.dblock b{font-family:var(--f-display);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.dblock i{font-style:normal;font-size:11px;color:var(--muted)}
