@@ -80,10 +80,10 @@ function reportRange(o){
 function reportEntries(o, r){
   let l = allEntries().filter(e => typeof e.date === 'string' && e.date >= r.from && e.date <= r.to);
   if (o.card) l = l.filter(e => e.cardId === o.card || e.toCardId === o.card);
-  if (o.cat) l = l.filter(e => o.cat.startsWith('g:') ? e.type !== 'transfer' && (catById(e.catId).group || '') === o.cat.slice(2) : e.catId === o.cat);
+  if (o.cat) { const has = o.cat.startsWith('g:') ? (id => (catById(id).group || '') === o.cat.slice(2)) : (id => id === o.cat); l = l.map(e => catPart(e, has)).filter(Boolean); }   // aufgeteilte Buchungen mit ihrem Teilbetrag
   if (o.taxOnly) l = l.filter(e => e.tax);
   if (o.person === '__none') l = l.filter(e => e.type !== 'transfer' && !(e.persons || []).some(personById));
-  else if (o.person) l = l.filter(e => (e.persons || []).includes(o.person)).map(e => { const sh = personShares(e)[o.person]; return sh != null && sh !== e.amount ? Object.assign({}, e, {amount:sh, _full:e.amount}) : e; });
+  else if (o.person) l = l.filter(e => (e.persons || []).includes(o.person)).map(e => { const sh = personShares(e)[o.person]; return sh != null && sh !== e.amount ? Object.assign({}, e, {amount:sh, _full:e._full || e.amount}) : e; });
   return l.sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 function reportFilterText(o){
@@ -174,13 +174,13 @@ function buildReport(o){
     if (!rows.length) { doc.text(M, y, 'Keine Einträge im Zeitraum.', {size:9, color:PDF_C.muted}); y += 14; }
     else head();
     for (const e of rows) {
-      const tr = e.type === 'transfer', sub = [e.note, (e.persons || []).length ? personNames(e).join(', ') : '', e.tax ? 'Steuer: ' + (TAX[e.tax] || e.tax) : ''].filter(Boolean).join(' · ');
+      const tr = e.type === 'transfer', sub = [isSplit(e) ? catShares(e).map(([c, v]) => catById(c).name + ' ' + money(v)).join(', ') : '', e.note, (e.persons || []).length ? personNames(e).join(', ') : '', e.tax ? 'Steuer: ' + (TAX[e.tax] || e.tax) : ''].filter(Boolean).join(' · ');
       const h = sub || e._full ? 25 : 16;
       need(h, head);
       doc.text(X.date, y, dmy(e.date), {size:8.5});
       doc.text(X.id, y, txId(e), {size:8.5, color:PDF_C.muted});
       doc.text(X.who, y, tr ? 'Umbuchung' : (e.merchant || catById(e.catId).name), {size:8.5, bold:true, maxW:166});
-      doc.text(X.cat, y, tr ? '–' : (isWithdrawal(e) ? 'Entnahme ' : '') + catById(e.catId).name, {size:8.5, maxW:94});
+      doc.text(X.cat, y, tr ? '–' : (isWithdrawal(e) ? 'Entnahme ' : '') + catLabel(e), {size:8.5, maxW:94});
       doc.text(X.card, y, tr ? ((cardById(e.cardId) || {}).name || '?') + ' → ' + ((cardById(e.toCardId) || {}).name || '?') : ((cardById(e.cardId) || {}).name || '–'), {size:8.5, maxW:R - 62 - X.card});
       doc.text(R, y, (tr ? '' : e.type === 'income' ? '+ ' : '– ') + money(e.amount), {size:8.5, bold:true, align:'right', color:e.type === 'income' ? PDF_C.ok : PDF_C.fg});
       if (sub) doc.text(X.who, y + 9.5, sub, {size:7.5, color:PDF_C.muted, maxW:R - 62 - X.who});

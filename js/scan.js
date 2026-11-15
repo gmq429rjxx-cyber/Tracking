@@ -14,10 +14,40 @@ async function toJpeg(file){
 }
 const ITEM_GROUPS = ['Getränke','Obst & Gemüse','Brot & Gebäck','Milch & Käse','Fleisch & Wurst','Fisch','Tiefkühl','Vorrat & Konserven','Süßes & Snacks','Alkohol','Drogerie & Hygiene','Haushalt & Reinigung','Baby & Kind','Tier','Pfand','Sonstiges'];
 function normItems(list){
-  return (Array.isArray(list) ? list : []).filter(i => i && (i.clean || i.name) && num(i.total) != null).slice(0, 80).map(i => ({
+  return (Array.isArray(list) ? list : []).filter(i => i && (i.clean || i.name) && num(i.total) != null).slice(0, 80).map(i => Object.assign({
     n:String(i.clean || i.name).trim().slice(0, 60), raw:String(i.name || '').trim().slice(0, 60), g:ITEM_GROUPS.includes(i.group) ? i.group : 'Sonstiges',
-    q:Math.max(0.001, num(i.qty) || 1), t:Math.round(num(i.total) * 100), k:i.kind === 'discount' || i.kind === 'deposit' ? i.kind : (i.group === 'Pfand' ? 'deposit' : (num(i.total) < 0 ? 'discount' : 'item'))}));
+    q:Math.max(0.001, num(i.qty) || 1), t:Math.round(num(i.total) * 100), k:i.kind === 'discount' || i.kind === 'deposit' ? i.kind : (i.group === 'Pfand' ? 'deposit' : (num(i.total) < 0 ? 'discount' : 'item'))},
+    splitCat(i.cat) ? {c:i.cat} : null));
 }
+/* ---------- Beleg auf mehrere Kategorien aufteilen ---------- */
+/* In eine Aufteilung dürfen nur Ausgaben-Kategorien, die nicht als Sparen zählen */
+const splitCat = id => typeof id === 'string' && cats().some(c => c.id === id && c.kind === 'expense' && !c.saving);
+const splitCats = () => cats().filter(c => c.kind === 'expense' && !c.saving);
+/* Was in welche Kategorie gehört – als Hinweis für die KI und für alte Belege ohne Artikel-Kategorie */
+const CAT_SCOPE = {lebensmittel:'food, drinks, Pfand', haushalt:'drugstore, hygiene, cleaning and household articles', kinder:'nappies, baby food, toys, children\'s articles', shopping:'clothing, shoes, textiles (also for children)', schule:'school supplies', gesundheit:'medicine, pharmacy products', geschenke:'gift articles', mobilitaet:'fuel'};
+const GROUP_CAT = Object.assign({'Drogerie & Hygiene':'haushalt', 'Haushalt & Reinigung':'haushalt', 'Baby & Kind':'kinder', Pfand:'lebensmittel'}, Object.fromEntries(ITEM_GROUPS.slice(0, 10).map(g => [g, 'lebensmittel'])));
+/* Kategorie eines Artikels: die gespeicherte, sonst aus der Warengruppe geraten, sonst die der Buchung */
+function itemCat(it, main, guess){
+  if (splitCat(it.c)) return it.c;
+  const g = guess && hasOwn(GROUP_CAT, it.g) ? GROUP_CAT[it.g] : '';
+  return g && splitCat(g) ? g : main;
+}
+/* Aufteilung aus den Artikeln: Preise zählen für ihre Kategorie, Rabatte mit Kategorie mindern diese, alle übrigen Abzüge verteilen sich anteilig.
+   Ergebnis [{catId, amount}] mit der Summe total, größter Teil zuerst – oder null, wenn alles in eine Kategorie fällt */
+function splitFromItems(items, total, main, guess){
+  if (!(total > 0) || !splitCat(main)) return null;
+  const w = {};
+  for (const it of items || []) {
+    if (it.t > 0) { const c = itemCat(it, main, guess); w[c] = (w[c] || 0) + it.t; }
+    else if (it.t < 0 && splitCat(it.c)) w[it.c] = (w[it.c] || 0) + it.t;
+  }
+  const sh = spread(Object.entries(w).filter(p => p[1] > 0), total).filter(p => p[1] > 0).sort((a, b) => b[1] - a[1]);
+  return sh.length > 1 ? sh.map(([catId, amount]) => ({catId, amount})) : null;
+}
+/* legt für jeden Artikel mit Preis die Kategorie fest, damit die Aufteilung nicht davon abhängt, welcher Teil gerade der größte ist */
+function pinItemCats(items, main, guess){ if (splitCat(main)) for (const it of items || []) if (it.t > 0) it.c = itemCat(it, main, guess); }
+/* setzt oder entfernt die Aufteilung einer Buchung; die Hauptkategorie ist der größte Teil */
+function applySplit(e, sp){ if (sp && sp.length > 1) { e.splits = sp; e.catId = sp[0].catId; } else delete e.splits; return e; }
 /* Gleiche Zahlung schon vorhanden (z. B. aus Bank-PDF)? Dann hängt der Bon dort an */
 function findMergeTarget(amount, date, type){
   if (!amount || !validISO(date)) return null;
@@ -26,17 +56,17 @@ function findMergeTarget(amount, date, type){
 }
 function scanPrompt(){
   /* nur Ausgaben-Kategorien mitsenden: Einnahme-Kategorien tragen oft Namen und werden für Belege nicht gebraucht */
-  const list = cats().filter(c => c.kind === 'expense').map(c => c.id + ' = ' + c.name).join('\n');
+const list = cats().filter(c => c.kind === 'expense').map(c => c.id + ' = ' + c.name + (hasOwn(CAT_SCOPE, c.id) && !c.saving ? ' (' + CAT_SCOPE[c.id] + ')' : '')).join('\n');
   return 'You are reading ONE receipt or invoice, given as photos or a PDF (usually Austrian or German; several photos are consecutive pages). Today is ' + today() + '.\n' +
     'Read only what is printed. Do not invent values; use null when something is unreadable.\n' +
     'Reply with only one JSON object of exactly this shape:\n' +
     '{"merchant": string|null, "date": "YYYY-MM-DD"|null, "total": number|null, "currency": string, "docType": "kassenbon"|"rechnung"|"sonstiges", "isRefund": boolean, ' +
-    '"items": [{"name": string, "clean": string, "group": string, "qty": number|null, "total": number, "kind": "item"|"discount"|"deposit"}], "savingsPrinted": number|null, "receiptNo": string|null, "taxHint": "wk"|"sa"|"agb"|"kb"|null, "warrantyMonths": number|null, "vat": [{"rate": number, "net": number|null, "tax": number|null, "gross": number|null}], ' +
+    '"items": [{"name": string, "clean": string, "group": string, "cat": string|null, "qty": number|null, "total": number, "kind": "item"|"discount"|"deposit"}], "savingsPrinted": number|null, "receiptNo": string|null, "taxHint": "wk"|"sa"|"agb"|"kb"|null, "warrantyMonths": number|null, "vat": [{"rate": number, "net": number|null, "tax": number|null, "gross": number|null}], ' +
     '"paymentHint": string|null, "cardLast4": string|null, "dueDate": "YYYY-MM-DD"|null, "categoryId": string, "note": string, "issues": [string], "confidence": number}\n' +
-    'Field rules:\n- merchant: the short brand or shop name people use, without legal form, country or branch ("Lidl", not "Lidl Österreich GmbH, Filiale Musterort").\n- total: the amount actually paid or owed, in currency units (23.45), positive.\n- items: line items with their line totals; discounts and Pfand returns as negative totals; at most 60 lines. kind = "discount" for every price reduction line (Rabatt, Aktion, Coupon, Lidl Plus, Mengenrabatt, Mitarbeiterrabatt, "-20%"), "deposit" for Pfand, otherwise "item". Never list summary lines such as "Sie haben gespart", "Ersparnis gesamt" or "Preisvorteil" as items; put that printed total savings amount (positive) into savingsPrinted, else null.\n- receiptNo: the printed receipt or invoice number (Bon-Nr., Beleg-Nr., Rechnungsnummer, Transaktions-Nr.) exactly as printed, else null.\n- taxHint (Austrian Arbeitnehmerveranlagung), only when clearly applicable, else null: "wk" Werbungskosten (Fachliteratur, Arbeitsmittel, Fortbildung, Arbeitskleidung), "agb" außergewöhnliche Belastung (Arzt, Zahnarzt, Medikamente auf Rezept, Brille, Therapie), "kb" Kinderbetreuung (Kindergarten, Hort, Tagesmutter), "sa" Sonderausgaben (Spenden, Kirchenbeitrag).\n- warrantyMonths: for durable goods (electronics, household appliances, tools, furniture, bicycles) the printed guarantee in months, otherwise 24; for consumables, food, services or subscriptions null. name = exactly as printed; clean = readable German product name without codes (e.g. "MIN.WASS.PRICK 6X1,5L" -> "Mineralwasser prickelnd 6×1,5 l"); qty = number of units if printed, else 1; group = one of: ' + ITEM_GROUPS.join(', ') + '.\n' +
+    'Field rules:\n- merchant: the short brand or shop name people use, without legal form, country or branch ("Lidl", not "Lidl Österreich GmbH, Filiale Musterort").\n- total: the amount actually paid or owed, in currency units (23.45), positive.\n- items: line items with their line totals; discounts and Pfand returns as negative totals; at most 60 lines. kind = "discount" for every price reduction line (Rabatt, Aktion, Coupon, Lidl Plus, Mengenrabatt, Mitarbeiterrabatt, "-20%"), "deposit" for Pfand, otherwise "item". Never list summary lines such as "Sie haben gespart", "Ersparnis gesamt" or "Preisvorteil" as items; put that printed total savings amount (positive) into savingsPrinted, else null.\n- receiptNo: the printed receipt or invoice number (Bon-Nr., Beleg-Nr., Rechnungsnummer, Transaktions-Nr.) exactly as printed, else null.\n- taxHint (Austrian Arbeitnehmerveranlagung), only when clearly applicable, else null: "wk" Werbungskosten (Fachliteratur, Arbeitsmittel, Fortbildung, Arbeitskleidung), "agb" außergewöhnliche Belastung (Arzt, Zahnarzt, Medikamente auf Rezept, Brille, Therapie), "kb" Kinderbetreuung (Kindergarten, Hort, Tagesmutter), "sa" Sonderausgaben (Spenden, Kirchenbeitrag).\n- warrantyMonths: for durable goods (electronics, household appliances, tools, furniture, bicycles) the printed guarantee in months, otherwise 24; for consumables, food, services or subscriptions null. name = exactly as printed; clean = readable German product name without codes (e.g. "MIN.WASS.PRICK 6X1,5L" -> "Mineralwasser prickelnd 6×1,5 l"); qty = number of units if printed, else 1; group = one of: ' + ITEM_GROUPS.join(', ') + '. cat = the id from the category list below that fits this single product, judged by what the product is and not by the shop (one supermarket receipt can contain food, drugstore articles, children\'s articles and clothing); for a discount line the cat of the item it reduces, or null when it applies to the whole receipt; null when unsure.\n' +
     '- vat: one entry per tax rate in percent (20, 10, 13, 19, 7, 0) as printed in the tax summary.\n- paymentHint: how it was paid as printed, e.g. "Visa", "Maestro", "Bar", "Apple Pay Mastercard".\n' +
     '- cardLast4: last four card digits if printed (masked numbers like ****1234), else null.\n- dueDate: payment due date on invoices only.\n' +
-    '- categoryId: the best matching id from this list:\n' + list + '\n' +
+    '- categoryId: the id that fits the largest part of the receipt, from this list:\n' + list + '\n' +
     '- note: a short German description, max 60 characters (e.g. "Wocheneinkauf", "Tanken Diesel 42 l").\n' +
     '- issues: short German sentences for anything that looks wrong or doubtful: totals that do not add up, VAT inconsistent, missing or odd date, illegible parts, duplicate lines, unusual prices, signs that this is only a quote or delivery note. Empty array if none.\n' +
     '- confidence: 0 to 1, how sure you are about total and date.';
@@ -99,11 +129,13 @@ function runChecks(r, d, cardMatch, mergeTarget){
   else if (cardMatch.how === 'unknown') out.push(['info', 'Karte •••• ' + cardMatch.l4 + ' ist nicht angelegt. Bitte Karte wählen.']);
   else if (cardMatch.how === 'cash') out.push(['ok', 'Barzahlung erkannt.']);
   if (d.type === 'expense' && d.amount) {
-    const b = S.profile.budgets[d.catId];
-    if (b) {
-      const after = (spentByCat(entriesIn(mkey(d.date)))[d.catId] || 0) + d.amount;
-      if (after > b) out.push(['info', 'Budget ' + catById(d.catId).name + ' wird damit um ' + money(after - b) + ' überschritten.']);
-      else if (after / b >= 0.8) out.push(['info', 'Budget ' + catById(d.catId).name + ' danach zu ' + Math.round(after / b * 100) + ' % verbraucht.']);
+    const sh = catShares(d), sp = spentByCat(entriesIn(mkey(d.date)).filter(e => e.id !== d.id));
+    if (sh.length > 1) out.push(['info', 'Aufgeteilt nach Artikeln: ' + sh.map(([c, v]) => catById(c).name + ' ' + money(v)).join(', ') + '. Unten änderbar.']);
+    for (const [c, v] of sh) {
+      const b = S.profile.budgets[c]; if (!b) continue;
+      const after = (sp[c] || 0) + v;
+      if (after > b) out.push(['info', 'Budget ' + catById(c).name + ' wird damit um ' + money(after - b) + ' überschritten.']);
+      else if (after / b >= 0.8) out.push(['info', 'Budget ' + catById(c).name + ' danach zu ' + Math.round(after / b * 100) + ' % verbraucht.']);
     }
   }
   if (validISO(r.dueDate)) { const dd = dayDiff(r.dueDate, today()); out.push([dd < 0 ? 'warn' : 'info', dd < 0 ? 'Zahlungsfrist ' + DAYL.format(parseISO(r.dueDate)) + ' ist abgelaufen.' : 'Zahlbar bis ' + DAYL.format(parseISO(r.dueDate)) + '.']); }
@@ -125,7 +157,7 @@ async function askClaude(blobs, prompt, signal, model){
   let res;
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal, referrerPolicy:'no-referrer', headers:{'content-type':'application/json', 'x-api-key':SET.apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:model || SET.model || 'claude-haiku-5-5', max_tokens:3000, messages:[{role:'user', content}]})});
+      body:JSON.stringify({model:model || SET.model || 'claude-haiku-5-5', max_tokens:6000, messages:[{role:'user', content}]})});
   } catch (e) { if (e && e.name === 'AbortError') throw {code:'cancelled'}; throw {code:'network'}; }
   let body = null; try { body = await res.json(); } catch (_) {}
   if (!res.ok) {
@@ -245,6 +277,7 @@ async function onReceiptFiles(files, pre){
   const cm = matchCard(r);
   const draft = {type, amount:total != null ? Math.round(Math.abs(total) * 100) : '', date:validISO(r.date) ? r.date : today(), catId:okCat ? r.categoryId : (type === 'income' ? 'einnahmen' : 'sonstiges'), cardId:cm.id, merchant:r.merchant ? shortMerchant(r.merchant) : '', merchantRaw:r.merchant ? String(r.merchant).slice(0, 80) : '', note:r.note ? String(r.note).slice(0, 80) : ''};
   draft.items = normItems(r.items);
+  if (draft.type === 'expense') pinItemCats(draft.items, draft.catId);
   if (r.receiptNo) draft.receiptNo = String(r.receiptNo).trim().slice(0, 40);
   const hash = await fileHash(files);
   draft.persons = personsFor(draft.merchant);
@@ -255,6 +288,7 @@ async function onReceiptFiles(files, pre){
   showReview(!!target);
   function showReview(useMerge){
   const d0 = useMerge ? Object.assign(clean(target), {items:draft.items, savings:draft.savings, tax:draft.tax, warrantyUntil:draft.warrantyUntil, merchant:(target.source === 'bank' && draft.merchant) ? draft.merchant : (target.merchant || draft.merchant), note:target.note || draft.note}) : Object.assign({}, draft);
+  if (d0.type === 'expense') applySplit(d0, splitFromItems(d0.items, d0.amount, d0.catId));   // Vorschlag aus den Artikel-Kategorien
   const checks = runChecks(r, d0, cm, useMerge ? target : null), verdict = verdictOf(checks);
   let detail = '';
   const vat = (Array.isArray(r.vat) ? r.vat : []).filter(v => v && num(v.rate) != null);

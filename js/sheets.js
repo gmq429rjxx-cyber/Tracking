@@ -75,7 +75,7 @@ function entryFormHTML(d){
     '<div class="seg" role="radiogroup" aria-label="Art"><input type="radio" name="ftype" id="ft-exp" value="expense"' + (d.type !== 'income' && d.type !== 'transfer' ? ' checked' : '') + '><label for="ft-exp">Ausgabe</label><input type="radio" name="ftype" id="ft-inc" value="income"' + (d.type === 'income' ? ' checked' : '') + '><label for="ft-inc">Einnahme</label><input type="radio" name="ftype" id="ft-trf" value="transfer"' + (d.type === 'transfer' ? ' checked' : '') + '><label for="ft-trf">Umbuchung</label></div>' +
     '<label class="field"><span>Betrag</span><span class="amount-wrap"><b>€</b><input class="input amount" id="f-amount" inputmode="decimal" autocomplete="off" placeholder="0,00" value="' + esc(amt) + '"></span></label>' +
     '<div class="field" id="f-merchant-f"' + (d.type === 'transfer' ? ' hidden' : '') + '><label for="f-merchant"><span>Händler oder Zahler</span></label><input class="input" id="f-merchant" autocomplete="off" autocorrect="off" value="' + esc(d.merchant || '') + '" placeholder="z. B. Billa"><div class="chips" id="f-sugg" aria-label="Vorschläge"></div></div>' +
-    '<div class="field" id="f-cat-f"' + (d.type === 'transfer' ? ' hidden' : '') + '><label for="f-cat"><span>Kategorie</span></label><div class="chips wrap" id="f-catchips"></div><div class="catall" id="f-catall" hidden></div><div class="impact" id="f-impact" hidden></div><select class="visually-hidden" id="f-cat" tabindex="-1" aria-hidden="true">' + catOptions(d.type === 'income' ? 'income' : 'expense', d.catId) + '</select></div>' +
+    '<div class="field" id="f-cat-f"' + (d.type === 'transfer' ? ' hidden' : '') + '><label for="f-cat"><span>Kategorie</span></label><div class="chips wrap" id="f-catchips"></div><div class="catall" id="f-catall" hidden></div><div class="impact" id="f-impact" hidden></div><div id="f-split"></div><select class="visually-hidden" id="f-cat" tabindex="-1" aria-hidden="true">' + catOptions(d.type === 'income' ? 'income' : 'expense', d.catId) + '</select></div>' +
     (persons().length ? '<div class="field" id="f-pers-f"><span>Für wen</span><div class="chips wrap" id="f-perschips">' + persons().map(p => '<button type="button" class="qchip" data-pers="' + esc(p.id) + '" aria-pressed="' + (d.persons || []).includes(p.id) + '"><i class="dot" style="--c:var(--c' + (p.color % 20) + ')"></i>' + esc(p.name) + '</button>').join('') + '</div></div>' : '') +
     '<div class="formgrid"><div class="field full"><span>Datum</span><div class="datebar"><button type="button" class="qchip" data-day="0">Heute</button><button type="button" class="qchip" data-day="1">Gestern</button><input class="input" type="date" id="f-date" value="' + esc(d.date || today()) + '" aria-label="Datum"></div></div>' +
     '<div class="field full"><span id="f-card-l">' + (d.type === 'transfer' ? 'Von' : 'Karte') + '</span><div class="chips wrap" id="f-cardchips"></div><select class="visually-hidden" id="f-card" tabindex="-1" aria-hidden="true">' + cardOptions(d.cardId) + '</select></div>' +
@@ -91,7 +91,7 @@ function entryFormHTML(d){
       '<label class="field"><span>Garantie bis</span><input class="input" type="date" id="f-warr" value="' + esc(d.warrantyUntil || '') + '"></label></div>' +
       '<div class="chips" style="margin-top:8px"><button type="button" class="qchip" data-warr="24">+ 2 Jahre</button><button type="button" class="qchip" data-warr="36">+ 3 Jahre</button><button type="button" class="qchip" data-warr="0">keine</button></div></details>' : '') +
     (d.receipts && d.receipts.some(r => r.blobId) ? '<div class="field"><span>Beleg</span><div class="thumbs">' + d.receipts.filter(r => r.blobId).map(r => r.pdf ? '<a class="pdftile" data-blob-link="' + esc(r.blobId) + '" target="_blank" rel="noopener">PDF</a>' : '<img alt="Beleg" data-blob="' + esc(r.blobId) + '">').join('') + '</div></div>' : '') +
-    (d.items && d.items.length ? '<details class="field"><summary>Artikel (' + d.items.length + ')</summary><div class="tablewrap"><table><tbody>' + d.items.map(i => '<tr><td style="white-space:normal">' + esc(i.n) + (i.q > 1 ? ' <span class="muted">×' + esc(String(i.q).replace('.', ',')) + '</span>' : '') + '</td><td class="muted">' + esc(i.g) + '</td><td class="r">' + money(i.t) + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+    (d.items && d.items.length ? '<details class="field"><summary>Artikel (' + d.items.length + ')</summary><div class="tablewrap"><table><tbody>' + d.items.map((i, n) => '<tr><td style="white-space:normal">' + esc(i.n) + (i.q > 1 ? ' <span class="muted">×' + esc(String(i.q).replace('.', ',')) + '</span>' : '') + '</td><td class="muted" data-icell="' + n + '">' + esc(i.g) + '</td><td class="r">' + money(i.t) + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
     (d.fx && d.fx.original ? '<p class="note" style="margin:0">Fremdwährung: ' + esc(d.fx.original) + (d.fx.markup ? ' · Kursaufschlag ' + esc(String(d.fx.markup).replace('.', ',')) + ' %' : '') + '</p>' : '') +
     '<p class="note" id="f-err" role="alert" hidden></p>' +
     (d.id && S.entries.has(d.id) ? '<p class="note" style="margin:0;text-align:center">ID ' + txId(d) + '</p>' : '') + '<div id="f-confirm"></div><div class="formfoot"><div class="btnrow"><button type="submit" class="btn primary" id="f-save" style="flex:1">Speichern</button>' + (d.id && S.entries.has(d.id) ? '<button type="button" class="btn danger" id="f-del">Löschen</button>' : '') + '</div></div></form>';
@@ -105,6 +105,7 @@ function mountEntryForm(root, draft, opts){
     const t = typeVal(), tr = t === 'transfer';
     $('#f-to-f', root).hidden = !tr; $('#f-trf-note', root).hidden = !tr; $('#f-cat-f', root).hidden = tr; $('#f-merchant-f', root).hidden = tr;
     $('#f-card-l', root).textContent = tr ? 'Von' : 'Karte'; renderCardChips();
+    parts = [];
     if (!tr) { $('#f-cat', root).innerHTML = catOptions(t, t === 'income' ? 'einnahmen' : 'sonstiges'); renderCatChips(); renderSugg(); }
   };
   /* Schnelleingabe: häufige Kategorien als Chips, Händler-Vorschläge aus der eigenen Historie */
@@ -117,7 +118,7 @@ function mountEntryForm(root, draft, opts){
     const chip = id => { const c = catById(id); return '<button type="button" class="qchip" data-cat="' + esc(id) + '" aria-pressed="' + (id === cur) + '"><i class="dot" style="--c:var(--c' + (c.color % 20) + ')"></i>' + (t === 'income' && c.saving ? 'Entnahme ' : '') + esc(c.name) + '</button>'; };
     const all = $('#f-catall', root), open = !all.hidden;
     $('#f-catchips', root).innerHTML = top.slice(0, 6).map(chip).join('') + '<button type="button" class="qchip" id="f-catmore" aria-expanded="' + open + '">' + (open ? 'Weniger' : 'Alle …') + '</button>';
-    renderImpact();
+    renderSplit();
     if (open) {
       const gOf = c => t === 'income' && c.saving ? 'Entnahme aus dem Ersparten' : (c.group || '');
       const list = cats().filter(c => catFits(c, t)), order = (S.profile.groups || []).concat([...new Set(list.map(gOf))]).filter((g, i, a) => a.indexOf(g) === i && list.some(c => gOf(c) === g));
@@ -128,12 +129,58 @@ function mountEntryForm(root, draft, opts){
     const box = $('#f-impact', root); if (!box) return;
     const cid = catEl.value, c = catById(cid), b = S.profile.budgets[cid];
     if (typeVal() !== 'expense' || !b || !c || c.saving) { box.hidden = true; return; }
-    const k = mkey($('#f-date', root).value || today()), amt = Math.abs(toCents(amountEl.value) || 0);
-    const sp = entriesIn(k).filter(e => e.type === 'expense' && e.catId === cid && e.id !== draft.id).reduce((a, e) => a + e.amount, 0);
+    const k = mkey($('#f-date', root).value || today()), amt = Math.max(0, Math.abs(toCents(amountEl.value) || 0) - partSum());
+    const sp = spentByCat(entriesIn(k).filter(e => e.type === 'expense' && e.id !== draft.id))[cid] || 0;
     const after = sp + amt, st = catState(c, after, b, paceOf(k)), left = b - after;
     box.hidden = false; box.className = 'impact ' + (st === 'done' ? 'ok' : st === 'open' ? '' : st);
     box.innerHTML = '<span>' + esc(c.name) + (amt ? ' danach' : '') + ': ' + money0(after) + ' / ' + money0(b) + '</span><b>' + (left >= 0 ? 'noch ' + money0(left) : money0(-left) + ' drüber') + '</b>';
   }
+  /* Aufteilung auf mehrere Kategorien: die gewählte Kategorie behält den Rest, jede Zeile darunter ist ein Teil für eine andere Kategorie */
+  const items = draft.items || [];
+  let parts = isSplit(draft) ? catShares(draft).filter(p => p[0] !== draft.catId).map(([catId, amount]) => ({catId, amount})) : [];
+  function partSum(){ const main = catEl.value; return typeVal() === 'expense' && splitCat(main) ? parts.reduce((a, p) => a + (p.catId !== main && p.amount > 0 ? p.amount : 0), 0) : 0; }
+  function splitNote(){
+    const n = $('#f-split-rest', root); if (!n) return;
+    const total = Math.abs(toCents(amountEl.value) || 0), rest = total - partSum(), bad = total > 0 && rest <= 0;
+    n.classList.toggle('badtxt', bad);
+    n.textContent = !total ? 'Erst oben den Betrag eingeben.' : bad ? 'Die Teile ergeben mehr als den Betrag.' : catById(catEl.value).name + ' behält ' + money(rest) + '.';
+  }
+  function renderSplit(){
+    const box = $('#f-split', root), main = catEl.value, on = typeVal() === 'expense' && splitCat(main);
+    parts = parts.filter(p => p.catId !== main);
+    const active = on && parts.length > 0;
+    const opts = sel => '<option value="">Kategorie …</option>' + splitCats().filter(c => c.id !== main).map(c => '<option value="' + esc(c.id) + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('');
+    box.innerHTML = !on ? '' : (active ? '<div class="splitbox">' + parts.map((p, i) => '<div class="splitrow"><select class="input" data-sp-cat="' + i + '" aria-label="Kategorie Teil ' + (i + 1) + '">' + opts(p.catId) + '</select><input class="input" data-sp-amt="' + i + '" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="Betrag Teil ' + (i + 1) + '" value="' + (p.amount ? (p.amount / 100).toFixed(2).replace('.', ',') : '') + '"><button type="button" class="iconbtn" data-sp-del="' + i + '" aria-label="Teil ' + (i + 1) + ' entfernen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>').join('') + '<p class="note" id="f-split-rest" style="margin:0"></p></div>' : '') +
+      '<div class="chips wrap"><button type="button" class="qchip" id="f-split-add">' + (active ? '+ weiterer Teil' : 'Auf mehrere Kategorien aufteilen') + '</button>' + (items.some(it => it.t > 0) ? '<button type="button" class="qchip" id="f-split-items">Nach Artikeln aufteilen</button>' : '') + (active ? '<button type="button" class="qchip" id="f-split-off">Nicht aufteilen</button>' : '') + '</div>';
+    /* Artikel-Liste: solange aufgeteilt ist, lässt sich jeder Artikel einer Kategorie zuordnen */
+    root.querySelectorAll('[data-icell]').forEach(td => { const it = items[Number(td.dataset.icell)]; if (!it) return;
+      if (active && it.t > 0) { const cur = splitCat(it.c) ? it.c : main; td.innerHTML = '<select class="isel" data-item="' + td.dataset.icell + '" aria-label="Kategorie für ' + esc(it.n) + '">' + splitCats().map(c => '<option value="' + esc(c.id) + '"' + (c.id === cur ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') + '</select>'; }
+      else td.textContent = active && it.t < 0 ? (splitCat(it.c) ? catById(it.c).name : 'anteilig') : (it.g || ''); });
+    splitNote(); renderImpact();
+  }
+  /* Teile aus den Artikeln neu berechnen; guess = fehlende Artikel-Kategorien aus der Warengruppe ableiten */
+  function splitByItems(guess){
+    const main = catEl.value, had = items.map(it => it.c);
+    pinItemCats(items, main, guess);
+    const sp = splitFromItems(items, Math.abs(toCents(amountEl.value) || 0), main);
+    if (sp) { catEl.value = sp[0].catId; parts = sp.slice(1); }
+    else if (guess) { items.forEach((it, i) => { if (had[i] == null) delete it.c; else it.c = had[i]; }); toast(Math.abs(toCents(amountEl.value) || 0) ? 'Alle Artikel gehören zu einer Kategorie.' : 'Erst den Betrag eingeben.'); return; }
+    else { const one = items.find(it => it.t > 0 && splitCat(it.c)); if (one) catEl.value = one.c; parts = []; }
+    renderCatChips();
+  }
+  $('#f-split', root).addEventListener('click', ev => {
+    const d = ev.target.closest('[data-sp-del]');
+    if (d) parts.splice(Number(d.dataset.spDel), 1);
+    else if (ev.target.closest('#f-split-add')) parts.push({catId:'', amount:0});
+    else if (ev.target.closest('#f-split-off')) parts = [];
+    else if (ev.target.closest('#f-split-items')) return splitByItems(true);
+    else return;
+    renderSplit();
+    if (ev.target.closest('#f-split-add')) { const s = root.querySelector('[data-sp-cat="' + (parts.length - 1) + '"]'); if (s) s.focus(); }
+  });
+  $('#f-split', root).addEventListener('change', ev => { const s = ev.target.closest('[data-sp-cat]'); if (s) parts[Number(s.dataset.spCat)].catId = s.value; });
+  $('#f-split', root).addEventListener('input', ev => { const a = ev.target.closest('[data-sp-amt]'); if (!a) return; parts[Number(a.dataset.spAmt)].amount = Math.abs(toCents(a.value) || 0); splitNote(); renderImpact(); });
+  root.addEventListener('change', ev => { const s = ev.target.closest('[data-item]'); if (!s) return; items[Number(s.dataset.item)].c = s.value; splitByItems(false); });
   function renderCardChips(){
     const cur = cardEl.value;
     $('#f-cardchips', root).innerHTML = activeCards(cur).map(c => '<button type="button" class="qchip" data-card="' + esc(c.id) + '" aria-pressed="' + (c.id === cur) + '"><i class="cardglyph" style="--c:var(--c' + (c.color % 20) + ');width:18px;height:12px;border-radius:3px"></i>' + esc(c.name) + '</button>').join('') +
@@ -168,7 +215,7 @@ function mountEntryForm(root, draft, opts){
     if (m && !draft.id) { if (cats().some(c => c.id === m.catId)) catEl.value = m.catId; if (m.cardId && cardById(m.cardId)) cardEl.value = m.cardId; renderCatChips(); renderCardChips(); }
   });
   renderCatChips(); renderSugg(); renderCardChips(); renderDay();
-  amountEl.addEventListener('input', renderImpact);
+  amountEl.addEventListener('input', () => { splitNote(); renderImpact(); });
   const pc = $('#f-perschips', root);
   if (pc) {
     pc.addEventListener('click', ev => { const b = ev.target.closest('[data-pers]'); if (!b) return; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); pc.dataset.touched = '1'; });
@@ -191,6 +238,14 @@ function mountEntryForm(root, draft, opts){
       if (!a || !b) { err.hidden = false; err.textContent = 'Für eine Umbuchung bitte beide Karten wählen.'; return; }
       if (a === b) { err.hidden = false; err.textContent = 'Von- und Nach-Karte müssen verschieden sein.'; return; }
     }
+    /* Aufteilung prüfen: jede Zeile braucht Kategorie und Betrag, die Hauptkategorie muss etwas behalten */
+    const main = $('#f-cat', root).value, split = new Map();
+    if (type === 'expense' && splitCat(main)) {
+      const rows = parts.filter(p => p.catId || p.amount > 0);
+      if (rows.some(p => !p.catId || !(p.amount > 0))) { err.hidden = false; err.textContent = 'Bitte bei jedem Teil der Aufteilung Kategorie und Betrag angeben.'; return; }
+      for (const p of rows) if (p.catId !== main && splitCat(p.catId)) split.set(p.catId, (split.get(p.catId) || 0) + p.amount);
+      if ([...split.values()].reduce((a, v) => a + v, 0) >= Math.abs(cents)) { err.hidden = false; err.textContent = 'Die Teile der Aufteilung ergeben mehr als den Betrag.'; return; }
+    }
     err.hidden = true;
     const btn = $('#f-save', root); btn.disabled = true; btn.textContent = 'Speichert …';
     const e = Object.assign({}, draft, {
@@ -200,6 +255,8 @@ function mountEntryForm(root, draft, opts){
     else { delete e.toCardId; e.catId = $('#f-cat', root).value; e.merchant = $('#f-merchant', root).value.trim(); }
     if (type !== 'transfer' && persons().length) { const ps = [...root.querySelectorAll('#f-perschips [aria-pressed="true"]')].map(b => b.dataset.pers); if (ps.length) e.persons = ps; else delete e.persons; }
     if (type === 'transfer') delete e.persons;
+    applySplit(e, split.size ? [{catId:e.catId, amount:e.amount - [...split.values()].reduce((a, v) => a + v, 0)}].concat([...split].map(([catId, amount]) => ({catId, amount}))).sort((a, b) => b.amount - a.amount) : null);
+    if (!e.splits && e.items) e.items = e.items.map(it => { const o = Object.assign({}, it); delete o.c; return o; });   // ohne Aufteilung gilt allein die Kategorie der Buchung
     if (type !== 'transfer') { const tx = $('#f-tax', root), wa = $('#f-warr', root); if (tx) { if (tx.value) e.tax = tx.value; else delete e.tax; } if (wa) { if (wa.value) e.warrantyUntil = wa.value; else delete e.warrantyUntil; } }
     if (e.example && e.note !== 'Beispiel') delete e.example;
     const rep = repEl ? repEl.value : '';

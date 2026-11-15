@@ -34,7 +34,8 @@ function entryRow(e, withDate){
   const cat = catById(e.catId), card = cardById(e.cardId);
   const title = e.merchant || cat.name;
   const pn = personNames(e);
-  const sub = [isWithdrawal(e) ? 'Entnahme ' + cat.name : cat.name !== title ? cat.name : '', pn.length ? pn.join(', ') : '', card ? card.name : (e.cardId ? 'Karte gelöscht' : ''), e.note && !(e.example && e.note === 'Beispiel') ? e.note : ''].filter(Boolean).join(' · ');
+  const cl = catLabel(e);
+  const sub = [isWithdrawal(e) ? 'Entnahme ' + cat.name : cl !== title ? cl : '', pn.length ? pn.join(', ') : '', card ? card.name : (e.cardId ? 'Karte gelöscht' : ''), e.note && !(e.example && e.note === 'Beispiel') ? e.note : ''].filter(Boolean).join(' · ');
   const inc = e.type === 'income';
   return '<button class="row" data-act="edit" data-id="' + esc(e.id) + '">' + badge(cat) + '<span class="row-main"><span class="row-title">' + esc(title) + (e.bankKeys && e.bankKeys.length ? ' ' + ICON.bank.replace('<svg ', '<svg class="clip" aria-label="Bank-PDF" ') : '') + (e.receipts && e.receipts.length ? ' ' + ICON.clip : '') + (e.pending ? ' <span class="chip info">vorgemerkt</span>' : '') + '</span><span class="row-sub">' + esc(sub || ' ') + '</span></span><span class="row-end"><span class="row-amt ' + (inc ? 'pos' : '') + '">' + (inc ? '+ ' : '− ') + money(e.amount) + (e._full ? '<small>von ' + money(e._full) + '</small>' : '') + '</span>' + (withDate ? '<span class="row-date">' + esc(DAY.format(parseISO(e.date))) + '</span>' : '') + '</span></button>';
 }
@@ -205,13 +206,13 @@ function fillEntries(){
   const q = S.q.trim().toLowerCase();
   let list = entriesIn(S.month);
   if (S.fCard) list = list.filter(e => S.fCard === '__none' ? !e.cardId : (e.cardId === S.fCard || e.toCardId === S.fCard));
-  if (S.fCat) list = list.filter(e => e.catId === S.fCat);
+  if (S.fCat) list = list.map(e => catPart(e, id => id === S.fCat)).filter(Boolean);   // aufgeteilte Buchungen mit ihrem Teilbetrag
   if (S.fType) list = list.filter(e => e.type === S.fType);
   if (S.fPers) list = list.filter(e => S.fPers === '__none' ? e.type !== 'transfer' && !(e.persons || []).some(personById) : (e.persons || []).includes(S.fPers));
-  if (q) list = list.filter(e => [e.merchant, e.note, e.type === 'transfer' ? 'Umbuchung' : catById(e.catId).name, (cardById(e.cardId) || {}).name, (cardById(e.toCardId) || {}).name, money(e.amount), txId(e)].join(' ').toLowerCase().includes(q));
+  if (q) list = list.filter(e => [e.merchant, e.note, e.type === 'transfer' ? 'Umbuchung' : entryCats(e).map(id => catById(id).name).join(' '), (cardById(e.cardId) || {}).name, (cardById(e.toCardId) || {}).name, money(e.amount), txId(e)].join(' ').toLowerCase().includes(q));
   /* Personenfilter: Summen und Beträge nur mit dem Anteil dieser Person (gleichmäßig aufgeteilt) */
   const share = S.fPers && S.fPers !== '__none';
-  if (share) list = list.map(e => { const sh = personShares(e)[S.fPers]; return sh != null && sh !== e.amount ? Object.assign({}, e, {amount:sh, _full:e.amount}) : e; });
+  if (share) list = list.map(e => { const sh = personShares(e)[S.fPers]; return sh != null && sh !== e.amount ? Object.assign({}, e, {amount:sh, _full:e._full || e.amount}) : e; });
   list.sort(byDateDesc);
   if (!S.eMode) { try { S.eMode = localStorage.getItem('kb-emode') || 'list'; } catch (_) { S.eMode = 'list'; } }
   $('#eMode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === S.eMode)));
@@ -242,7 +243,7 @@ function fillEntries(){
 
 function yearRow(c, yb){
   const y = S.month.slice(0, 4), cy = String(new Date().getFullYear()) === y;
-  const sp = entriesIn(y).filter(e => e.type === 'expense' && e.catId === c.id).reduce((a, e) => a + e.amount, 0);
+  const sp = spentByCat(entriesIn(y).filter(e => e.type === 'expense'))[c.id] || 0;
   const t = new Date(), pace = cy ? (t - new Date(t.getFullYear(), 0, 1)) / 864e5 / 365 : 1;
   const st = budgetState(sp, yb, pace), left = yb - sp;
   return '<button class="brow" data-act="budget-edit" data-cat="' + esc(c.id) + '"><span class="brow-top">' + badge(c) + '<span class="row-main"><span class="row-title">' + esc(c.name) + '</span><span class="row-sub">Jahresbudget ' + esc(y) + '</span></span>' + stChip(st) + '</span>' +
@@ -420,7 +421,7 @@ function personsSection(list){
   if (!persons().length) return '';
   const ex = {}, inc = {}, cat = {};
   for (const e of list) { if (e.type === 'transfer') continue; const sh = personShares(e);
-    for (const [id, v] of Object.entries(sh)) { if (isWithdrawal(e)) continue; if (e.type === 'income') inc[id] = (inc[id] || 0) + v; else if (!isSaving(e.catId)) { ex[id] = (ex[id] || 0) + v; const c = cat[id] = cat[id] || {}; c[e.catId] = (c[e.catId] || 0) + v; } } }
+    for (const [id, v] of Object.entries(sh)) { if (isWithdrawal(e)) continue; if (e.type === 'income') inc[id] = (inc[id] || 0) + v; else if (!isSaving(e.catId)) { ex[id] = (ex[id] || 0) + v; const c = cat[id] = cat[id] || {}; for (const [cid, a] of catShares(e)) c[cid] = (c[cid] || 0) + v * a / (e.amount || 1); } } }
   const ids = persons().map(p => p.id).concat(ex[''] || inc[''] ? [''] : []).filter(id => ex[id] || inc[id]);
   if (!ids.length) return '';
   const max = Math.max(1, ...ids.map(id => ex[id] || 0));

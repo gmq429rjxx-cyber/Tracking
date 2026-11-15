@@ -1,6 +1,6 @@
 // Kassabuch – Hilfsfunktionen, Datenmodell, Speicher (IndexedDB), Beispieldaten
 'use strict';
-const APP_VERSION = '2026.11.14-1';
+const APP_VERSION = '2026.11.15-1';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -135,8 +135,45 @@ const isSaving = id => !!(cats().find(c => c.id === id) || {}).saving;
 /* Entnahme = Einnahme in einer Spar-Kategorie: senkt „Gespart“ und das Sparziel, zählt nicht als Einnahme */
 const isWithdrawal = e => e.type === 'income' && isSaving(e.catId);
 const catFits = (c, type) => c.kind === type || (type === 'income' && !!c.saving);
-function sums(list){ let inc = 0, exp = 0, sav = 0; for (const e of list) { if (isWithdrawal(e)) sav -= e.amount || 0; else if (e.type === 'income') inc += e.amount || 0; else if (e.type === 'expense') { if (isSaving(e.catId)) sav += e.amount || 0; else exp += e.amount || 0; } } return {inc, exp, sav, bal:inc - exp - sav}; }
-function spentByCat(list){ const m = {}; for (const e of list) { if (e.type === 'expense') m[e.catId] = (m[e.catId] || 0) + (e.amount || 0); else if (isWithdrawal(e)) m[e.catId] = (m[e.catId] || 0) - (e.amount || 0); } return m; }
+function sums(list){ let inc = 0, exp = 0, sav = 0; for (const e of list) { if (isWithdrawal(e)) sav -= e.amount || 0; else if (e.type === 'income') inc += e.amount || 0; else if (e.type === 'expense') for (const [c, v] of catShares(e)) { if (isSaving(c)) sav += v; else exp += v; } } return {inc, exp, sav, bal:inc - exp - sav}; }
+/* Verteilt total im Verhältnis der Gewichte auf [[Schlüssel, Cent], …]; Rest-Cents gehen an die größten Reste, die Summe stimmt immer genau */
+function spread(parts, total){
+  const sum = parts.reduce((a, p) => a + p[1], 0); if (!(sum > 0) || !(total > 0)) return [];
+  const out = parts.map(([k, w]) => [k, Math.floor(w * total / sum), (w * total) % sum]);
+  let rest = total - out.reduce((a, p) => a + p[1], 0);
+  for (const p of out.slice().sort((a, b) => b[2] - a[2])) { if (rest <= 0) break; p[1]++; rest--; }
+  return out.map(p => [p[0], p[1]]);
+}
+/* Eine Ausgabe kann auf mehrere Kategorien aufgeteilt sein (e.splits). Ergebnis: [[catId, Cent], …], zusammen immer genau e.amount.
+   Die gespeicherten Teile gelten als Gewichte: ändert sich der Betrag (Bank-Abgleich, Personen-Anteil), bleibt das Verhältnis gleich. */
+function catShares(e){
+  const amt = e.amount || 0, sp = e.type === 'expense' && Array.isArray(e.splits) ? e.splits.filter(s => s && s.catId && s.amount > 0) : [];
+  if (sp.length < 2 || amt <= 0) return [[e.catId, amt]];
+  const sh = spread(sp.map(s => [s.catId, s.amount]), amt).filter(p => p[1] > 0);
+  return sh.length > 1 ? sh : [[e.catId, amt]];
+}
+const isSplit = e => catShares(e).length > 1;
+/* Kategorien einer Buchung umhängen, auch in der Aufteilung; fallen Teile zusammen, werden sie addiert */
+function mapCats(e, f){
+  if (e.catId) e.catId = f(e.catId);
+  if (!Array.isArray(e.splits)) return e;
+  const m = new Map(); for (const s of e.splits) { if (!s || !s.catId || !(s.amount > 0)) continue; const id = f(s.catId); m.set(id, (m.get(id) || 0) + s.amount); }
+  if (m.size > 1) e.splits = [...m].map(([catId, amount]) => ({catId, amount})); else delete e.splits;
+  return e;
+}
+const entryCats = e => catShares(e).map(p => p[0]);
+/* Kategorie-Name für Listen: bei aufgeteilten Buchungen „Lebensmittel + 2“ */
+const catLabel = e => { const n = catShares(e).length; return catById(e.catId).name + (n > 1 ? ' + ' + (n - 1) : ''); };
+/* Anteil einer Buchung für eine Auswahl von Kategorien: die Buchung selbst, eine Kopie mit dem Teilbetrag (_full = voller Betrag) oder null */
+function catPart(e, has){
+  if (e.type === 'transfer') return null;
+  const sh = catShares(e); if (sh.length < 2) return has(e.catId) ? e : null;
+  const keep = sh.filter(p => has(p[0])); if (!keep.length) return null; if (keep.length === sh.length) return e;
+  const o = Object.assign({}, e, {amount:keep.reduce((a, p) => a + p[1], 0), _full:e._full || e.amount, catId:keep.slice().sort((a, b) => b[1] - a[1])[0][0]});
+  if (keep.length > 1) o.splits = keep.map(([catId, amount]) => ({catId, amount})); else delete o.splits;
+  return o;
+}
+function spentByCat(list){ const m = {}; for (const e of list) { if (e.type === 'expense') for (const [c, v] of catShares(e)) m[c] = (m[c] || 0) + v; else if (isWithdrawal(e)) m[e.catId] = (m[e.catId] || 0) - (e.amount || 0); } return m; }
 function paceOf(k){ const t = today(); if (mkey(t) === k) return parseISO(t).getDate() / dim(k); return k < mkey(t) ? 1 : 0; }
 /* Ampel: über 100 % = überschritten; ab 85 % = knapp; ab dem 10. Tag zusätzlich knapp, wenn der Verbrauch 20 Punkte vor dem Kalender liegt (Fixkosten am Monatsanfang lösen so keinen Fehlalarm aus) */
 function budgetState(spent, budget, pace){ if (!budget) return null; const r = spent / budget; if (r > 1) return 'bad'; if (r >= 0.85 || (pace >= 0.33 && pace < 1 && r > pace + 0.2)) return 'warn'; return 'ok'; }
@@ -152,7 +189,7 @@ function dailyBase(k){
   if (!S.profile.totalBudget && exp.some(isFixedCat)) {
     const ids = new Set(exp.filter(c => !isFixedCat(c)).map(c => c.id));
     return {budget:exp.filter(c => ids.has(c.id)).reduce((a, c) => a + S.profile.budgets[c.id], 0), due:0, hint:' · ohne Fixkosten',
-      spent:l => l.reduce((a, e) => a + (e.type === 'expense' && ids.has(e.catId) ? e.amount : 0), 0)};
+      spent:l => l.reduce((a, e) => a + (e.type === 'expense' ? catShares(e).reduce((x, [c, v]) => x + (ids.has(c) ? v : 0), 0) : 0), 0)};
   }
   const t = today(), end = k + '-' + String(dim(k)).padStart(2, '0'); let due = 0;
   for (const r of S.profile.recurring) if (isActive(r) && r.type === 'expense' && !isSaving(r.catId) && (S.profile.totalBudget || S.profile.budgets[r.catId])) due += occurrences(r, addDays(t, 1), end).length * r.amount;

@@ -36,6 +36,22 @@ async function migrateChecks(){
   }
   if (fix.length) await putEntries(fix);
 }
+/* Einmalig: schon erfasste Supermarkt- und Drogerie-Belege nach ihren Artikeln auf Kategorien aufteilen.
+   Andere Buchungen bleiben unberührt; die Aufteilung lässt sich in jedem Eintrag ändern oder aufheben. */
+async function migrateSplits(){
+  try {
+    if (await kvGet('mig-split1')) return;
+    const ch = [];
+    for (const e of allEntries()) {
+      if (e.type !== 'expense' || e.splits || !(e.items && e.items.length) || !['lebensmittel', 'haushalt'].includes(e.catId)) continue;
+      const c = clean(e); pinItemCats(c.items, c.catId, true);
+      const sp = splitFromItems(c.items, c.amount, c.catId);
+      if (sp) ch.push(applySplit(c, sp));
+    }
+    if (ch.length) { await putEntries(ch); toast(ch.length + (ch.length === 1 ? ' alter Beleg' : ' alte Belege') + ' nach Artikeln aufgeteilt'); }
+    await kvSet('mig-split1', 1);
+  } catch (_) {}
+}
 async function migrateMerchants(){
   try {
     if (await kvGet('mig-merchant1')) return;
@@ -69,7 +85,7 @@ async function init(){
     S.mode = 'local'; S.ready = true;
     await snapshotBeforeUpdate(p, list);
     await bookDue();
-    if ((await kvGet('skipMigrations')) !== APP_VERSION) { await migrateMerchants(); await migrateColors(); await migrateChecks(); }
+    if ((await kvGet('skipMigrations')) !== APP_VERSION) { await migrateMerchants(); await migrateColors(); await migrateChecks(); await migrateSplits(); }
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(ok => { S.persisted = ok; }).catch(() => {});
   } catch (e) {
     S.mode = 'error'; S.banner = 'Der Gerätespeicher ist nicht verfügbar (privates Surfen?). Die App kann so nichts speichern.';

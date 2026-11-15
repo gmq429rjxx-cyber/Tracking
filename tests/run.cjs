@@ -25,9 +25,10 @@ const SWIPE = ([sel, dx, hold]) => new Promise(res => { const el = document.quer
     el.dispatchEvent(ev); };
   mk('touchstart', x); setTimeout(() => { for (let i = 1; i <= 6; i++) if (dx) mk('touchmove', x + dx * i / 6); mk('touchend', x + dx); res(); }, hold || 30); });
 
-const results = []; let page, ctx, browser, base, pageErrors = [];
+const results = []; let page, ctx, browser, base, pageErrors = [], scanReply = null;   // scanReply: abweichende KI-Antwort für einen Test
 const ok = (c, m) => { if (!c) throw new Error(m); };
-async function test(name, fn){ const t0 = Date.now(); try { await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeitüberschreitung nach 90 s')), 90000))]); results.push([true, name, Date.now() - t0]); console.log('  ✓ ' + name); } catch (e) { results.push([false, name, e.message]); console.log('  ✗ ' + name + '\n      ' + e.message.split('\n')[0]); } }
+async function test(name, fn){ if (process.env.ONLY && !name.includes(process.env.ONLY)) return;   // ONLY=Teil des Namens: nur diese Tests
+  const t0 = Date.now(); try { await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeitüberschreitung nach 90 s')), 90000))]); results.push([true, name, Date.now() - t0]); console.log('  ✓ ' + name); } catch (e) { results.push([false, name, e.message]); console.log('  ✗ ' + name + '\n      ' + e.message.split('\n')[0]); } }
 async function fresh(opts = {}){
   const copt = {viewport:{width:390, height:844}, isMobile:true, hasTouch:true, acceptDownloads:true, colorScheme:opts.dark ? 'dark' : 'light'};
   const wk = ENGINE === 'webkit';
@@ -36,7 +37,7 @@ async function fresh(opts = {}){
   else {
     if (ctx) await ctx.close();
     ctx = wk ? await engine.launchPersistentContext(fs.mkdtempSync(path.join(require('os').tmpdir(), 'kb-wk-')), copt) : await browser.newContext(copt);
-    await ctx.route('https://api.anthropic.com/**', r => r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(FAKE_SCAN)}]})}));
+    await ctx.route('https://api.anthropic.com/**', r => r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(scanReply || FAKE_SCAN)}]})}));
   }
   page = await ctx.newPage(); page.setDefaultTimeout(5000); page.on('pageerror', e => pageErrors.push(String(e)));
   if (wk) {
@@ -318,7 +319,7 @@ async function addEntry({amount, merchant, cat, card}){
   });
   await test('Backup-Prüfung lässt saubere Daten unverändert', async () => {
     await fresh(); await page.click('[data-act="examples-load"]'); await page.waitForTimeout(500); await loadPlan();
-    await seed(`(p, es) => { p.persons = [{id:'pa', name:'Person A', color:1}]; p.personAlias = {markt:['pa']}; p.goals = [{id:'g1', name:'Rücklage', target:100000, due:'2027-06', catId:'', cardId:'', start:0, startDate:'${today()}'}]; es.put({id:'k1', type:'expense', amount:1299, catId:'lebensmittel', date:'${today()}', merchant:'Markt', note:'', persons:['pa'], tax:'wk', warrantyUntil:'2027-01-01', bankKeys:['x'], receipts:[{blobId:'b1'}], items:[{n:'Brot', raw:'BROT', g:'Brot & Gebäck', q:1, t:299, k:'item'}, {n:'Alt', t:-50}], ai:{status:'warn', findings:['Datum fehlt']}}); }`);
+    await seed(`(p, es) => { p.persons = [{id:'pa', name:'Person A', color:1}]; p.personAlias = {markt:['pa']}; p.goals = [{id:'g1', name:'Rücklage', target:100000, due:'2027-06', catId:'', cardId:'', start:0, startDate:'${today()}'}]; es.put({id:'k1', type:'expense', amount:1299, catId:'lebensmittel', date:'${today()}', merchant:'Markt', note:'', persons:['pa'], tax:'wk', warrantyUntil:'2027-01-01', bankKeys:['x'], receipts:[{blobId:'b1'}], items:[{n:'Brot', raw:'BROT', g:'Brot & Gebäck', q:1, t:299, k:'item'}, {n:'Alt', t:-50}], ai:{status:'warn', findings:['Datum fehlt']}}); es.put({id:'k2', type:'expense', amount:5000, catId:'lebensmittel', date:'${today()}', merchant:'Markt', splits:[{catId:'lebensmittel', amount:3500}, {catId:'sonstiges', amount:1500}], items:[{n:'Brot', raw:'BROT', g:'Brot & Gebäck', q:1, t:3500, k:'item', c:'lebensmittel'}, {n:'Topf', raw:'TOPF', g:'Sonstiges', q:1, t:1500, k:'item', c:'sonstiges'}]}); }`);
     const r = await page.evaluate(() => { const canon = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(x => [x, v[x]])) : v);
       const diff = allEntries().filter(e => canon(cleanBackupEntry(e)) !== canon(e)).map(e => e.id);
       return {n:allEntries().length, diff, prof:canon(cleanBackupProfile(S.profile)) === canon(normalizeProfile(S.profile))}; });
@@ -355,6 +356,80 @@ async function addEntry({amount, merchant, cat, card}){
   await test('Beleg-Scan sendet keine Einnahme-Kategorien mit', async () => {
     await fresh(); const t = await page.evaluate(() => scanPrompt());
     ok(/lebensmittel = /.test(t) && !/gehalt = /i.test(t) && !/Einnahme\)/.test(t), 'Kategorienliste im Prompt');
+  });
+  await test('Aufteilung: Budgets und Summen zählen die Teilbeträge, Kategoriefilter zeigt den Anteil', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.budgets = {lebensmittel:20000, kinder:10000}; es.put({id:'s1', type:'expense', amount:10000, catId:'lebensmittel', date:'${today()}', merchant:'Markt', splits:[{catId:'lebensmittel', amount:7000}, {catId:'kinder', amount:3000}]}); es.put({id:'s2', type:'expense', amount:500, catId:'kinder', date:'${today()}', merchant:'Spielwaren'}); es.put({id:'s3', type:'income', amount:90000, catId:'gehalt', date:'${today()}', merchant:'Arbeit'}); }`);
+    const r = await page.evaluate(() => { const l = entriesIn(S.month), e = S.entries.get('s1'); const odd = catShares(Object.assign({}, e, {amount:5001}));
+      return {by:spentByCat(l), s:sums(l), odd, bs:budgetSpent(l), label:catLabel(e), plain:catShares(S.entries.get('s2')), inc:catShares(S.entries.get('s3'))}; });
+    ok(r.by.lebensmittel === 7000 && r.by.kinder === 3500 && r.s.exp === 10500 && r.s.inc === 90000 && r.bs === 10500, 'Summen: ' + JSON.stringify(r));
+    ok(r.odd.length === 2 && r.odd[0][1] + r.odd[1][1] === 5001 && Math.abs(r.odd[0][1] - 3501) <= 1, 'geänderter Betrag behält das Verhältnis: ' + JSON.stringify(r.odd));
+    ok(r.label === 'Lebensmittel + 1' && r.plain.length === 1 && r.plain[0][1] === 500 && r.inc.length === 1, 'Einzelbuchungen unverändert');
+    await go('eintraege'); ok(/Lebensmittel \+ 1/.test(await page.innerText('#eList [data-id="s1"].row')), 'Liste zeigt die Aufteilung nicht');
+    await page.selectOption('#eCat', 'kinder'); await page.waitForTimeout(300);
+    ok(await page.$$eval('#eList .swipe', l => l.length) === 2, 'Filter: Anzahl');
+    const row = (await page.innerText('#eList [data-id="s1"].row')).replace(/\s+/g, ' ');
+    ok(/30,00/.test(row) && /von € ?100,00/.test(row), 'Anteil in der Zeile: ' + row);
+    ok(/35,00/.test(await page.innerText('#eSum')), 'Summe mit Anteil: ' + await page.innerText('#eSum'));
+    await go('uebersicht'); const ov = (await page.innerText('#view .brow[data-cat="kinder"]')).replace(/\s+/g, ' '); ok(/35/.test(ov), 'Budget Kinder in der Übersicht: ' + ov);
+  });
+  await test('Aufteilung im Eintrag: Teil anlegen, Rest bleibt, zu viel wird abgelehnt, aufheben', async () => {
+    await fresh();
+    await page.click('.tabbar [data-act="add"]'); await page.waitForTimeout(250);
+    await page.fill('#f-amount', '100'); await page.fill('#f-merchant', 'Markt');
+    if (!(await page.$('#f-catchips [data-cat="lebensmittel"]'))) await page.click('#f-catmore'); await page.click('[data-cat="lebensmittel"]');
+    await page.click('#f-split-add'); await page.selectOption('[data-sp-cat="0"]', 'kinder'); await page.fill('[data-sp-amt="0"]', '30');
+    ok(/Lebensmittel behält € ?70,00/.test((await page.innerText('#f-split-rest')).replace(/\s+/g, ' ')), 'Rest: ' + await page.innerText('#f-split-rest'));
+    await page.click('#f-save'); await page.waitForTimeout(450);
+    let e = (await page.evaluate(DUMP)).entries[0];
+    ok(e.catId === 'lebensmittel' && JSON.stringify(e.splits) === JSON.stringify([{catId:'lebensmittel', amount:7000}, {catId:'kinder', amount:3000}]), 'gespeichert: ' + JSON.stringify(e.splits));
+    await go('eintraege'); await page.click('#eList [data-act="edit"]'); await page.waitForTimeout(350);
+    ok((await page.inputValue('[data-sp-amt="0"]')) === '30,00' && (await page.inputValue('[data-sp-cat="0"]')) === 'kinder', 'Teil nicht wieder angezeigt');
+    await page.fill('[data-sp-amt="0"]', '120'); await page.click('#f-save'); await page.waitForTimeout(300);
+    ok(await page.isVisible('#f-err') && /mehr als den Betrag/.test(await page.innerText('#f-err')), 'zu große Teile nicht abgelehnt');
+    await page.fill('[data-sp-amt="0"]', '80'); await page.click('#f-save'); await page.waitForTimeout(450);
+    e = (await page.evaluate(DUMP)).entries[0]; ok(e.catId === 'kinder' && e.splits[0].amount === 8000 && e.splits[1].amount === 2000, 'größter Teil wird Hauptkategorie: ' + JSON.stringify(e));
+    await page.click('#eList [data-act="edit"]'); await page.waitForTimeout(350); await page.click('#f-split-off'); await page.click('#f-save'); await page.waitForTimeout(450);
+    e = (await page.evaluate(DUMP)).entries[0]; ok(!e.splits && e.catId === 'kinder' && e.amount === 10000, 'Aufheben: ' + JSON.stringify(e));
+  });
+  await test('Beleg-Scan: Artikel-Kategorien ergeben einen Aufteilungs-Vorschlag, Rabatt wird anteilig verteilt', async () => {
+    await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    scanReply = Object.assign({}, FAKE_SCAN, {total:20, receiptNo:'4712', savingsPrinted:1, items:[{name:'MILCH', clean:'Milch 1l', group:'Milch & Käse', cat:'lebensmittel', qty:1, total:6, kind:'item'}, {name:'BROT', clean:'Brot', group:'Brot & Gebäck', cat:null, qty:1, total:3, kind:'item'}, {name:'WINDELN', clean:'Windeln', group:'Baby & Kind', cat:'kinder', qty:1, total:9, kind:'item'}, {name:'SOCKEN', clean:'Socken', group:'Sonstiges', cat:'gehalt', qty:1, total:3, kind:'item'}, {name:'RABATT', clean:'Rabatt', group:'Sonstiges', cat:null, qty:1, total:-1, kind:'discount'}]});
+    try {
+      ok(/"cat": string\|null/.test(await page.evaluate(() => scanPrompt())), 'Prompt fragt keine Artikel-Kategorie ab');
+      await go('uebersicht'); await page.setInputFiles('#receiptInput', {name:'bon2.png', mimeType:'image/png', buffer:TINY_PNG}); await page.waitForTimeout(2500);
+      ok(/Aufgeteilt nach Artikeln/.test(await page.innerText('#sheet')), 'Hinweis auf die Aufteilung fehlt');
+      ok((await page.inputValue('[data-sp-cat="0"]')) === 'kinder' && (await page.inputValue('[data-sp-amt="0"]')) === '8,57', 'Vorschlag: ' + await page.inputValue('[data-sp-amt="0"]'));
+      await page.click('#f-save'); await page.waitForTimeout(500);
+      const e = (await page.evaluate(DUMP)).entries[0];
+      ok(e.amount === 2000 && e.catId === 'lebensmittel' && JSON.stringify(e.splits) === JSON.stringify([{catId:'lebensmittel', amount:1143}, {catId:'kinder', amount:857}]), 'gespeichert: ' + JSON.stringify(e.splits));
+      ok(e.items.map(i => i.c || '-').join() === 'lebensmittel,lebensmittel,kinder,lebensmittel,-', 'Artikel-Kategorien: ' + e.items.map(i => i.c || '-').join());
+      /* einen Artikel umhängen: die Teile werden neu berechnet */
+      await page.evaluate(id => openEntry(id), e.id); await page.waitForTimeout(450);
+      await page.evaluate(() => { [...document.querySelectorAll('#entryForm details')].forEach(d => { d.open = true; }); });
+      await page.selectOption('[data-item="3"]', 'shopping'); await page.waitForTimeout(200);
+      await page.click('#f-save'); await page.waitForTimeout(450);
+      const e2 = (await page.evaluate(DUMP)).entries[0];
+      ok(e2.splits.length === 3 && e2.splits.reduce((a, s) => a + s.amount, 0) === 2000 && e2.splits.some(s => s.catId === 'shopping' && s.amount === 286), 'nach Umhängen: ' + JSON.stringify(e2.splits));
+    } finally { scanReply = null; }
+  });
+  await test('Alte Belege: einmalige Aufteilung nach Warengruppen, andere Buchungen bleiben unverändert', async () => {
+    await fresh();
+    const food = `{n:'Brot', raw:'BROT', g:'Brot & Gebäck', q:1, t:600, k:'item'}`, baby = `{n:'Windeln', raw:'WINDELN', g:'Baby & Kind', q:1, t:400, k:'item'}`;
+    await seed(`(p, es) => { kv.delete('mig-split1');
+      es.put({id:'m1', type:'expense', amount:1000, catId:'lebensmittel', date:'${today()}', merchant:'Markt', items:[${food}, ${baby}]});
+      es.put({id:'m2', type:'expense', amount:600, catId:'lebensmittel', date:'${today()}', merchant:'Markt', items:[${food}]});
+      es.put({id:'m3', type:'expense', amount:1000, catId:'restaurant', date:'${today()}', merchant:'Gasthaus', items:[${food}, ${baby}]});
+      es.put({id:'m4', type:'expense', amount:1000, catId:'lebensmittel', date:'${today()}', merchant:'Markt'});
+      es.put({id:'m5', type:'income', amount:1000, catId:'gehalt', date:'${today()}', merchant:'Arbeit', items:[${food}, ${baby}]}); }`);
+    await page.waitForTimeout(400);
+    const d = Object.fromEntries((await page.evaluate(DUMP)).entries.map(e => [e.id, e]));
+    ok(JSON.stringify(d.m1.splits) === JSON.stringify([{catId:'lebensmittel', amount:600}, {catId:'kinder', amount:400}]) && d.m1.catId === 'lebensmittel' && d.m1.amount === 1000, 'm1: ' + JSON.stringify(d.m1.splits));
+    for (const id of ['m2', 'm3', 'm4', 'm5']) ok(!d[id].splits && !(d[id].items || []).some(i => i.c), id + ' wurde verändert');
+    /* zweiter Start: nichts passiert mehr, auch nicht nach dem Aufheben */
+    await page.evaluate(async () => { const e = clean(S.entries.get('m1')); delete e.splits; await saveEntry(e); });
+    await page.reload(); await page.waitForTimeout(700);
+    ok(!(await page.evaluate(() => S.entries.get('m1').splits)), 'Aufteilung kam von selbst wieder');
   });
   await test('Mehrere Belege: Warteschlange, Überspringen, Zähler', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);

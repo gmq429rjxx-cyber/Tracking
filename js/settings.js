@@ -25,7 +25,7 @@ document.addEventListener('click', ev => {
   const sec = (a || t).closest('.panel'); if (sec) sec.outerHTML = lookPanel();
 });
 function openSettings(){
-  const used = {}; for (const e of allEntries()) used[e.catId] = (used[e.catId] || 0) + 1;
+  const used = {}; for (const e of allEntries()) for (const id of new Set(entryCats(e))) used[id] = (used[id] || 0) + 1;
   const hasEx = allEntries().some(e => e.example) || S.profile.cards.some(c => c.example) || S.profile.exampleBudgetKeys.length;
   const catRows = type => cats().filter(c => c.kind === type).map(c => '<div class="catedit"><span class="dot" style="--c:var(--c' + (c.color % 20) + ')"></span><label class="visually-hidden" for="cn-' + esc(c.id) + '">Name</label><input class="input" id="cn-' + esc(c.id) + '" data-cat="' + esc(c.id) + '" value="' + esc(c.name) + '"><button class="iconbtn" type="button" data-catdel="' + esc(c.id) + '" aria-label="' + esc(c.name) + ' löschen"' + (used[c.id] ? ' disabled title="Wird in ' + used[c.id] + ' Einträgen verwendet"' : '') + '><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div>').join('');
   const keyMasked = SET.apiKey ? SET.apiKey.slice(0, 10) + '…' + SET.apiKey.slice(-4) : '';
@@ -136,12 +136,12 @@ async function exportData(kind, opt){
     return;
   }
   const q = csvCell;
-  const rows = [['ID','Datum','Typ','Betrag','Kategorie','Karte','Händler','Notiz','Personen']].concat(list.map(e => [txId(e), e.date, isWithdrawal(e) ? 'Entnahme' : e.type === 'income' ? 'Einnahme' : e.type === 'transfer' ? 'Umbuchung' : 'Ausgabe', (e.amount / 100).toFixed(2).replace('.', ','), e.type === 'transfer' ? '' : catById(e.catId).name, ((cardById(e.cardId) || {}).name || '') + (e.type === 'transfer' ? ' → ' + ((cardById(e.toCardId) || {}).name || '') : ''), e.merchant || '', e.note || '', personNames(e).join(', ')]));
+  const rows = [['ID','Datum','Typ','Betrag','Kategorie','Karte','Händler','Notiz','Personen','Aufteilung']].concat(list.map(e => [txId(e), e.date, isWithdrawal(e) ? 'Entnahme' : e.type === 'income' ? 'Einnahme' : e.type === 'transfer' ? 'Umbuchung' : 'Ausgabe', (e.amount / 100).toFixed(2).replace('.', ','), e.type === 'transfer' ? '' : catById(e.catId).name, ((cardById(e.cardId) || {}).name || '') + (e.type === 'transfer' ? ' → ' + ((cardById(e.toCardId) || {}).name || '') : ''), e.merchant || '', e.note || '', personNames(e).join(', '), isSplit(e) ? catShares(e).map(([c, v]) => catById(c).name + ' ' + (v / 100).toFixed(2).replace('.', ',')).join('; ') : '']));
   await deliverFile('kassabuch-' + stamp + '.csv', '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n'), 'text/csv');
 }
 function openPlan(d, fname){
   const exp = d.categories.filter(c => c.kind === 'expense'), groups = d.groups || [...new Set(exp.map(c => c.group))];
-  const remap = d.remap || {}, moved = allEntries().filter(e => remap[e.catId]).length;
+  const remap = d.remap || {}, moved = allEntries().filter(e => entryCats(e).some(id => remap[id])).length;
   const rowsHTML = groups.map(g => { const cs = exp.filter(c => c.group === g); const sum = cs.reduce((a, c) => a + (c.budget || 0), 0); return '<tr><td><b>' + esc(g) + '</b></td><td class="r"><b>' + money0(Math.round(sum * 100)) + '</b></td></tr>' + cs.map(c => '<tr><td style="padding-left:18px">' + esc(c.name) + '</td><td class="r">' + (c.budget ? money0(Math.round(c.budget * 100)) : '–') + '</td></tr>').join(''); }).join('');
   openSheet('Budgetplan übernehmen',
     '<p class="note" style="margin:0">' + esc(d.title || fname) + '</p><div class="tablewrap"><table><tbody>' + rowsHTML + '</tbody></table></div>' +
@@ -149,7 +149,7 @@ function openPlan(d, fname){
     '<div class="panel"><h3>Was passiert</h3><ul class="checks"><li>Kategorien, Gruppen und Monatsbudgets werden wie oben gesetzt.</li><li>Investment und Rücklage zählen als gespart, nicht als Ausgabe.</li><li>' + (moved ? moved + ' bestehende Einträge werden in die neuen Kategorien verschoben.' : 'Bestehende Einträge bleiben unverändert.') + '</li><li>Benutzte eigene Kategorien bleiben erhalten.</li></ul></div>' +
     '<button class="btn primary" id="pl-go">Plan übernehmen</button>',
     root => { $('#pl-go', root).onclick = async () => {
-      const p = clean(S.profile), used = new Set(allEntries().map(e => e.catId)), planIds = new Set(d.categories.map(c => c.id));
+      const p = clean(S.profile), used = new Set(allEntries().flatMap(entryCats)), planIds = new Set(d.categories.map(c => c.id));
       const keep = p.categories.filter(c => !planIds.has(c.id) && !remap[c.id] && used.has(c.id)).map(c => Object.assign(c, {group:c.group || 'Sonstige'}));
       p.categories = d.categories.map(c => ({id:String(c.id), name:String(c.name), kind:c.kind === 'income' ? 'income' : 'expense', color:c.id in PLAN_COLORS ? PLAN_COLORS[c.id] : /^lohn-/.test(c.id) ? 14 : Number(c.color) % 20 || 0, group:c.group || '', saving:!!c.saving})).concat(keep);
       p.budgets = {}; p.yearBudgets = {}; for (const c of d.categories) { if (c.budget) p.budgets[c.id] = Math.round(c.budget * 100); else if (c.yearBudget) p.yearBudgets[c.id] = Math.round(c.yearBudget * 100); }
@@ -158,7 +158,7 @@ function openPlan(d, fname){
       for (const r of p.recurring) if (remap[r.catId]) r.catId = remap[r.catId];
       for (const k of Object.keys(p.merchantAlias)) if (remap[p.merchantAlias[k].catId]) p.merchantAlias[k].catId = remap[p.merchantAlias[k].catId];
       await saveProfile(p);
-      const ch = allEntries().filter(e => remap[e.catId]).map(e => Object.assign(clean(e), {catId:remap[e.catId]}));
+      const ch = allEntries().filter(e => entryCats(e).some(id => remap[id])).map(e => mapCats(clean(e), id => remap[id] || id));
       if (ch.length) await putEntries(ch);
       closeSheet(); S.tab = 'budgets'; history.replaceState(null, '', '#budgets'); render(); toast('Budgetplan übernommen');
     }; });
@@ -228,7 +228,8 @@ function cleanBackupEntry(e){
   if (o.tax != null && !(isStr(o.tax) && hasOwn(TAX, o.tax))) delete o.tax;
   for (const k of ['warrantyUntil', 'dueDate']) if (o[k] != null && o[k] !== '' && !validISO(o[k])) delete o[k];
   for (const k of ['persons', 'bankKeys']) if (o[k] != null) o[k] = strList(o[k]);
-  if (o.items != null) o.items = (Array.isArray(o.items) ? o.items : []).filter(i => i && typeof i === 'object' && isStr(i.n) && Number.isFinite(i.t)).map(i => { if (i.raw != null && !isStr(i.raw)) delete i.raw; if (i.g != null && !isStr(i.g)) delete i.g; if (i.q != null && !(Number.isFinite(i.q) && i.q > 0)) i.q = 1; if (i.k != null && !['item', 'discount', 'deposit'].includes(i.k)) delete i.k; return i; });
+  if (o.items != null) o.items = (Array.isArray(o.items) ? o.items : []).filter(i => i && typeof i === 'object' && isStr(i.n) && Number.isFinite(i.t)).map(i => { if (i.raw != null && !isStr(i.raw)) delete i.raw; if (i.g != null && !isStr(i.g)) delete i.g; if (i.q != null && !(Number.isFinite(i.q) && i.q > 0)) i.q = 1; if (i.k != null && !['item', 'discount', 'deposit'].includes(i.k)) delete i.k; if (i.c != null && !isStr(i.c)) delete i.c; return i; });
+  if (o.splits != null) { const sp = (Array.isArray(o.splits) ? o.splits : []).filter(s => s && typeof s === 'object' && isStr(s.catId) && s.catId && Number.isFinite(s.amount) && s.amount > 0).slice(0, 20).map(s => ({catId:s.catId, amount:Math.round(s.amount)})); if (o.type === 'expense' && sp.length > 1) o.splits = sp; else delete o.splits; }
   if (o.receipts != null) o.receipts = (Array.isArray(o.receipts) ? o.receipts : []).filter(r => r && typeof r === 'object' && isStr(r.blobId) && r.blobId);
   if (o.ai != null) {
     if (typeof o.ai !== 'object' || Array.isArray(o.ai)) delete o.ai;
@@ -301,7 +302,7 @@ function remapCards(p, from, to, list){
   p.cards = p.cards.filter(c => c.id !== from);
 }
 function remapCats(p, from, to, list){
-  for (const e of list) if (e.catId === from) e.catId = to;
+  for (const e of list) mapCats(e, id => id === from ? to : id);
   for (const r of p.recurring) if (r.catId === from) r.catId = to;
   for (const k of Object.keys(p.merchantAlias)) if (p.merchantAlias[k].catId === from) p.merchantAlias[k].catId = to;
   p.categories = p.categories.filter(c => c.id !== from); delete p.budgets[from];
@@ -320,7 +321,7 @@ function cleanupData(){
 function openCleanup(){
   const p = S.profile, all = allEntries(), d = cleanupData();
   const cnt = id => all.filter(e => e.cardId === id || e.toCardId === id).length;
-  const catCnt = {}; for (const e of all) catCnt[e.catId] = (catCnt[e.catId] || 0) + 1;
+  const catCnt = {}; for (const e of all) for (const id of new Set(entryCats(e))) catCnt[id] = (catCnt[id] || 0) + 1;
   const rich = c => !!(c.last4 || c.ibanLast4 || Object.values(p.bankMap).includes(c.id));
   const cardRows = p.cards.map((c, i) => {
     const k = cardKey(c.name), guess = rich(c) ? null : p.cards.find((o, j) => o.id !== c.id && cardKey(o.name) === k && k && (rich(o) || j < i));
@@ -356,9 +357,9 @@ function openCleanup(){
       const bk = $('#cl-cats', root); if (bk) bk.onclick = async () => {
         const p2 = clean(S.profile), list = allEntries().map(clean), moves = [...root.querySelectorAll('[data-km]')].filter(x => x.value).map(x => [x.dataset.km, x.value]);
         if (!moves.length) return toast('Nichts ausgewählt.');
-        const before = new Map(allEntries().map(e => [e.id, e.catId]));
+        const before = new Map(allEntries().map(e => [e.id, entryCats(e).join()]));
         for (const [from, to] of moves) remapCats(p2, from, to, list);
-        await fin(p2, list.filter(e => before.get(e.id) !== e.catId), null, moves.length + ' Kategorien zusammengeführt');
+        await fin(p2, list.filter(e => before.get(e.id) !== entryCats(e).join()), null, moves.length + ' Kategorien zusammengeführt');
       };
       const bd = $('#cl-dups', root); if (bd) bd.onclick = async () => {
         const del = [...root.querySelectorAll('[data-dup]:checked')].map(x => d.dups[+x.dataset.dup][0].id);
@@ -370,7 +371,7 @@ function openCleanup(){
         if (!sel.length) return toast('Nichts angehakt.');
         const now = new Date().toISOString();
         const add = sel.map(([a, b]) => ({id:newId() + Math.random().toString(36).slice(2, 5), type:'transfer', amount:a.amount, date:a.date, catId:'', cardId:a.cardId, toCardId:b.cardId, merchant:'', note:a.note || b.note || 'Umbuchung', imported:true, importBatch:a.importBatch, createdAt:a.createdAt || now, updatedAt:now}));
-        const gone = new Set(sel.flatMap(x => [x[0].id, x[1].id])), left = new Set(allEntries().filter(e => !gone.has(e.id)).map(e => e.catId));
+        const gone = new Set(sel.flatMap(x => [x[0].id, x[1].id])), left = new Set(allEntries().filter(e => !gone.has(e.id)).flatMap(entryCats));
         const p2 = clean(S.profile), drop = p2.categories.filter(c => c.id.startsWith('k-') && /umbuch|transfer|übertrag|uebertrag/i.test(c.name) && !left.has(c.id)).map(c => c.id);
         p2.categories = p2.categories.filter(c => !drop.includes(c.id));
         await fin(drop.length ? p2 : null, add, [...gone], sel.length + ' Umbuchungen erstellt');
@@ -390,7 +391,7 @@ function openCleanup(){
         const batch = d.batches.get(b.dataset.undo) || [];
         const l = batch.filter(e => !(e.bankKeys && e.bankKeys.length) && !hasBon(e) && !keeps(e)), gone = new Set(l.map(e => e.id));
         const left = allEntries().filter(e => !gone.has(e.id));
-        const usedCat = new Set(left.map(e => e.catId)), usedCard = new Set(left.flatMap(e => [e.cardId, e.toCardId]));
+        const usedCat = new Set(left.flatMap(entryCats)), usedCard = new Set(left.flatMap(e => [e.cardId, e.toCardId]));
         const p2 = clean(S.profile);
         for (const r of p2.recurring) { usedCat.add(r.catId); usedCard.add(r.cardId); usedCard.add(r.toCardId); }
         const bCats = new Set(batch.map(e => e.catId)), bCards = new Set(batch.flatMap(e => [e.cardId, e.toCardId]).filter(Boolean));
@@ -532,6 +533,7 @@ function openSnapshotRestore(sn){
       await tx('entries', 'readwrite', st => { st.clear(); for (const e of sn.entries) st.put(e); });
       S.entries = new Map(sn.entries.map(e => [e.id, e]));
       await kvSet('skipMigrations', APP_VERSION);   // der Umbau dieser Version soll den Stand nicht gleich wieder ändern
+      await kvSet('mig-split1', 1);   // und die einmalige Aufteilung alter Belege kommt auch später nicht von selbst wieder
       await saveProfile(normalizeProfile(sn.profile));
       closeSheet(); render(); toast('Stand vom ' + DAYL.format(new Date(sn.at)) + ' zurückgeholt');
     }; });
