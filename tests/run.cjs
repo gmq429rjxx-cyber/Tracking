@@ -515,6 +515,34 @@ async function addEntry({amount, merchant, cat, card}){
     ok(e && e.type === 'income' && e.catId === 'shopping' && e.amount === 2722 && e.cardId === 'rv', JSON.stringify(e));
     ok((await page.evaluate(() => spentByCat(allEntries()).shopping)) === 2278, 'Ausgaben Shopping nicht gemindert');
   });
+  await test('Bank-Parser: Raiffeisen-Lastschrift von Trade Republic wird als Raiffeisen gelesen', async () => {
+    await fresh(); const r = await page.evaluate(async () => { const m = await import('./bank.js');
+      return m.parseBank(['Buchung', 'Bank | Raiffeisenbank Musterregion eGen', 'Kontobezeichnung | Max Muster', 'IBAN | AT61 1904 3002 3457 3201', 'Geldausgang', 'Buchungsdatum | Buchungstext | Valutadatum | Betrag',
+        '12.10.2026 | Trade Republic Trade Republic aaaaaaaa- | 12.10.2026 | -500,00 EUR', 'bbbb-4ccc-8ddd-eeeeeeeeeeee', 'DE89 3704 0044 0532 0130 00', 'TESTREF12345XY', 'DE02 1203 0000 0000 2020 51', 'ADYBDEB2XXX', '17.11.2026, | angemeldet als: Max Muster'], '2026-10-12_Buchung_123456.pdf'); });
+    ok(r.ok && r.bank === 'rb' && r.type === 'expense' && r.amount === 50000 && r.date === '2026-10-12' && r.kind === 'transfer' && r.id === '123456', JSON.stringify(r));
+    ok(r.merchant === 'Trade Republic' && r.counterpartyIbanLast4 === '3000' && r.ibanLast4 === '3201', 'Name/Konten: ' + r.merchant + ' ' + r.counterpartyIbanLast4 + ' ' + r.ibanLast4);
+  });
+  await test('Bank-Import: Lastschrift an eigene Bank wird Umbuchung (änderbar, Konto wird gemerkt)', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.cards.push({id:'rbk', name:'Girokonto', ibanLast4:'3201'}, {id:'trk', name:'Broker', last4:'1111'}); p.bankMap['tr:1111:-'] = 'trk'; }`);
+    const pdf = (() => { const t = [[20, 200, 'Buchung'], [20, 185, 'Bank'], [200, 185, 'Raiffeisenbank Musterregion eGen'], [20, 172, 'IBAN'], [200, 172, 'AT61 1904 3002 3457 3201'], [20, 158, 'Geldausgang'],
+        [20, 145, 'Buchungsdatum'], [110, 145, 'Buchungstext'], [300, 145, 'Valutadatum'], [420, 145, 'Betrag'], [20, 130, '12.10.2026'], [110, 130, 'Trade Republic Trade Republic aaaaaaaa-'], [300, 130, '12.10.2026'], [420, 130, '-500,00 EUR'],
+        [110, 118, 'bbbb-4ccc-8ddd-eeeeeeeeeeee'], [110, 106, 'DE89 3704 0044 0532 0130 00'], [110, 94, 'TESTREF12345XY'], [20, 40, '17.11.2026,'], [110, 40, 'angemeldet als: Max Muster']];
+      const txt = t.map(([x, y, s]) => 'BT /F1 9 Tf ' + x + ' ' + y + ' Td (' + s + ') Tj ET').join('\n');
+      const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 520 220] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>', '<< /Length ' + txt.length + ' >>\nstream\n' + txt + '\nendstream', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+      let out = '%PDF-1.4\n', offs = []; objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+      const x = out.length; out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
+      return Buffer.from(out, 'latin1'); })();
+    await page.setInputFiles('#bankInput', {name:'2026-10-12_Buchung_987.pdf', mimeType:'application/pdf', buffer:pdf});
+    for (let i = 0; i < 20 && /Lese \d/.test(await page.innerText('#sheetBody')); i++) await page.waitForTimeout(500);
+    const t = (await page.innerText('#sheetBody')).replace(/\s+/g, ' ');
+    ok(/Umbuchung/.test(t) && /Trade Republic/.test(t), 'Vorschau: ' + t.slice(0, 240));
+    ok((await page.inputValue('#bk-cp-0')) === 'trk', 'Gegenkonto nicht vorgeschlagen');
+    await page.click('#bk-go'); await page.waitForTimeout(500);
+    const d = await page.evaluate(DUMP), e = d.entries[0];
+    ok(e && e.type === 'transfer' && e.amount === 50000 && e.cardId === 'rbk' && e.toCardId === 'trk' && e.date === '2026-10-12', JSON.stringify(e));
+    ok(d.profile.ibanMap['3000'] === 'trk', 'Gegenkonto nicht gemerkt');
+  });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
     await page.click('[data-act="examples-load"]'); for (const r of ['uebersicht', 'statistik', 'karten']) await go(r);

@@ -56,6 +56,8 @@ const titleCase = s => s.toLowerCase().replace(/(^|[\s\-/.&])([a-zäöüß])/g, 
 export function parseBank(lines, fileName){
   const text = lines.join('\n');
   try {
+    /* Raiffeisen-Buchungsbeleg zuerst: im Buchungstext kann eine andere Bank stehen (z. B. Lastschrift von Trade Republic) */
+    if (/^Bank \| Raiffeisen/im.test(text) && /^Buchungsdatum \|/m.test(text)) return raiffeisen(lines, fileName);
     if (/Revolut Bank UAB/i.test(text)) return /Karteneinzahlungsbeleg/.test(text) ? revolutTopup(lines) : /Überweisungsbestätigung/.test(text) ? revolutTransfer(lines) : revolut(lines);
     if (/TRADE REPUBLIC/i.test(text)) return /ÜBERWEISUNGSBESTÄTIGUNG/.test(text) ? trTransfer(lines, text, fileName) : tradeRepublic(lines, text, fileName);
     if (/Raiffeisen/i.test(text) && /Buchungstext/.test(text)) return raiffeisen(lines, fileName);
@@ -112,11 +114,14 @@ function raiffeisen(lines, fileName){
   const code = (raw.match(/\b([DKB]\d)\b/) || [])[1] || '';
   const income = lines.some(l => l === 'Geldeingang') || (amt > 0 && !lines.some(l => l === 'Geldausgang'));
   const isTransfer = !!cpIban || /Online Banking|Überweisung|Dauerauftrag|SEPA|Gutschrift/i.test(raw);
-  const cleaned = raw.replace(/Online Banking vom [\d.]+ um/gi, ' ').replace(/\b[DKB]\d\b/g, ' ').replace(/\b(POS|AT|ATM|BANKOMAT|KARTE|K\d)\b/g, ' ').replace(/\b\d[\d./:-]*\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const cleaned = raw.replace(/[0-9a-f]{8}-\s*[0-9a-f]{4}-\s*[0-9a-f]{4}-\s*[0-9a-f]{4}-\s*[0-9a-f]{12}/gi, ' ')   // Zahlungs-ID (UUID, auch über zwei Zeilen)
+    .replace(/\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{10,}\b/g, ' ')   // Mandats- oder Zahlungsreferenz
+    .replace(/Online Banking vom [\d.]+ um/gi, ' ').replace(/\b[DKB]\d\b/g, ' ').replace(/\b(POS|AT|ATM|BANKOMAT|KARTE|K\d)\b/g, ' ').replace(/\b\d[\d./:-]*\b/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(.{3,}?) \1\b/i, '$1');   // „Trade Republic Trade Republic“ → einmal
   const bm = String(fileName || '').match(/Buchung_(\d+)/);
   return {ok:true, bank:'rb', bankName:'Raiffeisen', id:bm ? bm[1] : hash(date + amt + raw), date, amount:Math.abs(amt), type:income ? 'income' : 'expense',
     merchant:cleaned ? (cleaned === cleaned.toUpperCase() ? titleCase(cleaned) : cleaned) : raw, merchantRaw:raw, cardLast4:'', cardCode:isTransfer ? '' : code, ibanLast4:ibanLast4(lines), pending:false,
-    time:timePart ? timePart.split(/\s+/)[1] : null, kind:isTransfer ? 'transfer' : 'card', counterpartyIbanLast4:cpIban};
+    time:timePart ? timePart.split(/\s+/)[1] : null, kind:isTransfer ? 'transfer' : 'card', counterpartyIbanLast4:cpIban, reference:isTransfer && cleaned ? cleaned : ''};
 }
 
 function trTransfer(lines, text, fileName){

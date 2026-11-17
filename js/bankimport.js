@@ -21,7 +21,9 @@ function bankCard(bank){
 }
 const OWN_BANKS = [['revolut', /revolut/i], ['tr', /trade\s*republic/i]];
 /* Kartenzahlung an eine eigene Bank (Aufladung) -> Karte dieser Bank */
-function topupTarget(p){ if (p.kind !== 'card' || p.type !== 'expense') return ''; const t = (p.merchantRaw || '') + ' ' + (p.merchant || ''); for (const [b, rx] of OWN_BANKS) if (b !== p.bank && rx.test(t)) return bankCard(b); return ''; }
+/* eigene Bank im Buchungstext (Aufladung, Lastschrift des Brokers …) → deren Karte/Konto */
+function ownBankTarget(p){ const t = (p.merchantRaw || '') + ' ' + (p.merchant || ''); for (const [b, rx] of OWN_BANKS) if (b !== p.bank && rx.test(t)) return bankCard(b); return ''; }
+function topupTarget(p){ return p.kind === 'card' && p.type === 'expense' ? ownBankTarget(p) : ''; }
 function sourceCard(p){
   const mk = p.bank + ':' + (p.cardLast4 || p.cardCode || '-') + ':' + (p.ibanLast4 || '-');
   const ok = id => id && cardById(id);
@@ -79,11 +81,14 @@ async function onBankFiles(files){
       continue;
     }
     if (rows.some(r => r.key === key)) { skipped++; continue; }
-    const sc = sourceCard(p), cc = p.kind === 'transfer' ? counterCard(p) : topupTarget(p);
+    const sc = sourceCard(p), kc = p.kind === 'transfer' ? counterCard(p) : '';
+    /* Gegenkonto unbekannt, aber eigene Bank im Text: als Umbuchung vorschlagen, unten änderbar */
+    const guess = p.kind === 'transfer' && !kc ? ownBankTarget(p) : '';
+    const cc = p.kind === 'transfer' ? kc || guess : topupTarget(p);
     const al = S.profile.merchantAlias[aliasKey(p.merchantRaw || p.merchant)];
     const name = al ? al.name : p.merchant;
     const hist = al || (p.type === 'income' && !p.refund) ? null : guessFromHistory(name);   // Erstattung: Kategorie der früheren Käufe
-    const row = {p, key, mk:sc.mk, cardId:sc.id, cc, name, catId:al ? al.catId : (hist ? hist.catId : ''), use:true, action:'new'};
+    const row = {p, key, mk:sc.mk, cardId:sc.id, cc, ccGuess:!!guess, name, catId:al ? al.catId : (hist ? hist.catId : ''), use:true, action:'new'};
     rows.push(row);
   }
   renderBankReview(rows, skipped, failed);
@@ -123,7 +128,7 @@ function renderBankReview(rows, skipped, failed){
   bankMatch(rows);
   if (!rows.length) { closeSheet(); toast(failed.length ? failed.length + ' PDF(s) nicht lesbar.' : 'Keine neuen Buchungen. ' + skipped + ' schon importiert.'); if (failed.length) openSheet('Bank-PDFs', '<div class="panel"><h3>Nicht gelesen</h3><ul class="checks">' + failed.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul></div>'); return; }
   const unmapped = [...new Map(rows.filter(r => r.action !== 'update' && !r.cardId).map(r => [r.mk, r.p])).entries()];
-  const cpUnknown = [...new Map(rows.filter(r => r.action !== 'update' && r.p.kind === 'transfer' && (!r.cc || r.cpManual) && r.p.counterpartyIbanLast4).map(r => [r.p.counterpartyIbanLast4, r])).entries()];
+  const cpUnknown = [...new Map(rows.filter(r => r.action !== 'update' && r.p.kind === 'transfer' && (!r.cc || r.cpManual || r.ccGuess) && r.p.counterpartyIbanLast4).map(r => [r.p.counterpartyIbanLast4, r])).entries()];
   const ccUnknown = [...new Map(rows.filter(r => r.action !== 'update' && r.p.counterpartyCardLast4 && (!r.cc || r.cpManual)).map(r => [r.p.counterpartyCardLast4, r])).entries()];
   const open = rows.filter(r => r.use && r.action === 'new' && r.type !== 'transfer' && !r.catId).length;
   const label = r => r.action === 'update' ? '<span class="chip info">aktualisiert</span>' : r.action === 'merge' ? '<span class="chip ok">ergänzt ' + esc(r.target.merchant || (r.target.type === 'transfer' ? 'Umbuchung' : catById(r.target.catId).name)) + '</span>' : r.action === 'pair' ? '<span class="chip ok">Gegenbuchung</span>' : r.type === 'transfer' ? '<span class="chip info">Umbuchung</span>' : '<span class="chip info">neu</span>';
