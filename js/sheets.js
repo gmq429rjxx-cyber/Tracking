@@ -45,7 +45,7 @@ function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = fals
 
 const lastCard = { get(){ try { return localStorage.getItem('kb-last-card') || ''; } catch (_) { return ''; } }, set(v){ try { localStorage.setItem('kb-last-card', v); } catch (_) {} } };
 
-function catOptions(type, sel){ return cats().filter(c => catFits(c, type)).map(c => '<option value="' + esc(c.id) + '"' + (c.id === sel ? ' selected' : '') + '>' + (type === 'income' && c.saving ? 'Entnahme ' : '') + esc(c.name) + '</option>').join(''); }
+function catOptions(type, sel){ return cats().filter(c => catFits(c, type)).map(c => '<option value="' + esc(c.id) + '"' + (c.id === sel ? ' selected' : '') + '>' + backPrefix(c, type) + esc(c.name) + '</option>').join(''); }
 /* Inaktiv = "aktiv bis" liegt vor heute; Buchungen bleiben erhalten */
 const isInactive = c => !!(c && c.activeUntil && c.activeUntil < today());
 const activeCards = keep => S.profile.cards.filter(c => !isInactive(c) || c.id === keep);
@@ -66,7 +66,7 @@ function topCats(type, n){
   const from = isoOf(new Date(Date.now() - 120 * 864e5)), cnt = {};
   for (const e of allEntries()) if (e.type === type && e.date >= from) cnt[e.catId] = (cnt[e.catId] || 0) + 1;
   const ranked = Object.keys(cnt).filter(id => cats().some(c => c.id === id && catFits(c, type))).sort((a, b) => cnt[b] - cnt[a]);
-  for (const c of cats()) if (catFits(c, type) && !ranked.includes(c.id)) ranked.push(c.id);
+  for (const c of cats()) if ((c.kind === type || (type === 'income' && c.saving)) && !ranked.includes(c.id)) ranked.push(c.id);   // Erstattungs-Kategorien nur, wenn schon benutzt – sonst unter „Alle …“
   return ranked.slice(0, n);
 }
 function entryFormHTML(d){
@@ -115,23 +115,24 @@ function mountEntryForm(root, draft, opts){
     const t = typeVal(); if (t === 'transfer') return;
     const top = topCats(t, 6), cur = catEl.value;
     if (cur && !top.includes(cur)) top.unshift(cur);
-    const chip = id => { const c = catById(id); return '<button type="button" class="qchip" data-cat="' + esc(id) + '" aria-pressed="' + (id === cur) + '"><i class="dot" style="--c:var(--c' + (c.color % 20) + ')"></i>' + (t === 'income' && c.saving ? 'Entnahme ' : '') + esc(c.name) + '</button>'; };
+    const chip = id => { const c = catById(id); return '<button type="button" class="qchip" data-cat="' + esc(id) + '" aria-pressed="' + (id === cur) + '"><i class="dot" style="--c:var(--c' + (c.color % 20) + ')"></i>' + backPrefix(c, t) + esc(c.name) + '</button>'; };
     const all = $('#f-catall', root), open = !all.hidden;
     $('#f-catchips', root).innerHTML = top.slice(0, 6).map(chip).join('') + '<button type="button" class="qchip" id="f-catmore" aria-expanded="' + open + '">' + (open ? 'Weniger' : 'Alle …') + '</button>';
     renderSplit();
     if (open) {
-      const gOf = c => t === 'income' && c.saving ? 'Entnahme aus dem Ersparten' : (c.group || '');
-      const list = cats().filter(c => catFits(c, t)), order = (S.profile.groups || []).concat([...new Set(list.map(gOf))]).filter((g, i, a) => a.indexOf(g) === i && list.some(c => gOf(c) === g));
+      const gOf = c => t === 'income' && c.kind === 'expense' ? (c.saving ? 'Entnahme aus dem Ersparten' : 'Erstattung einer Ausgabe') : (c.group || '');
+      const list = cats().filter(c => catFits(c, t) && c.kind === t).concat(cats().filter(c => catFits(c, t) && c.kind !== t)), order = (S.profile.groups || []).concat([...new Set(list.map(gOf))]).filter((g, i, a) => a.indexOf(g) === i && list.some(c => gOf(c) === g));
       all.innerHTML = order.map(g => { const cs = list.filter(c => gOf(c) === g); return cs.length ? '<div><h4>' + esc(g || (t === 'income' ? 'Einnahmen' : 'Weitere')) + '</h4><div class="chips wrap" style="margin-top:6px">' + cs.map(c => chip(c.id)).join('') + '</div></div>' : ''; }).join('');
     }
   }
   function renderImpact(){
     const box = $('#f-impact', root); if (!box) return;
     const cid = catEl.value, c = catById(cid), b = S.profile.budgets[cid];
-    if (typeVal() !== 'expense' || !b || !c || c.saving) { box.hidden = true; return; }
+    const back = typeVal() === 'income' && c && c.kind === 'expense' && !c.saving;   // Erstattung senkt das Budget
+    if ((typeVal() !== 'expense' && !back) || !b || !c || c.saving) { box.hidden = true; return; }
     const k = mkey($('#f-date', root).value || today()), amt = Math.max(0, Math.abs(toCents(amountEl.value) || 0) - partSum());
-    const sp = spentByCat(entriesIn(k).filter(e => e.type === 'expense' && e.id !== draft.id))[cid] || 0;
-    const after = sp + amt, st = catState(c, after, b, paceOf(k)), left = b - after;
+    const sp = spentByCat(entriesIn(k).filter(e => e.id !== draft.id))[cid] || 0;
+    const after = back ? sp - amt : sp + amt, st = catState(c, after, b, paceOf(k)), left = b - after;
     box.hidden = false; box.className = 'impact ' + (st === 'done' ? 'ok' : st === 'open' ? '' : st);
     box.innerHTML = '<span>' + esc(c.name) + (amt ? ' danach' : '') + ': ' + money0(after) + ' / ' + money0(b) + '</span><b>' + (left >= 0 ? 'noch ' + money0(left) : money0(-left) + ' drüber') + '</b>';
   }

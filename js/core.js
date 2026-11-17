@@ -1,6 +1,6 @@
 // Kassabuch – Hilfsfunktionen, Datenmodell, Speicher (IndexedDB), Beispieldaten
 'use strict';
-const APP_VERSION = '2026.11.15-1';
+const APP_VERSION = '2026.11.17-1';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -134,8 +134,12 @@ const entriesIn = prefix => allEntries().filter(e => typeof e.date === 'string' 
 const isSaving = id => !!(cats().find(c => c.id === id) || {}).saving;
 /* Entnahme = Einnahme in einer Spar-Kategorie: senkt „Gespart“ und das Sparziel, zählt nicht als Einnahme */
 const isWithdrawal = e => e.type === 'income' && isSaving(e.catId);
-const catFits = (c, type) => c.kind === type || (type === 'income' && !!c.saving);
-function sums(list){ let inc = 0, exp = 0, sav = 0; for (const e of list) { if (isWithdrawal(e)) sav -= e.amount || 0; else if (e.type === 'income') inc += e.amount || 0; else if (e.type === 'expense') for (const [c, v] of catShares(e)) { if (isSaving(c)) sav += v; else exp += v; } } return {inc, exp, sav, bal:inc - exp - sav}; }
+/* Erstattung: Geld zurück für eine Ausgabe (Retoure, Storno). Gebucht als Einnahme in der Ausgaben-Kategorie, mindert dort die Ausgaben */
+const isRefund = e => e.type === 'income' && !isSaving(e.catId) && (cats().find(c => c.id === e.catId) || {}).kind === 'expense';
+/* Einnahmen dürfen auch in Ausgaben-Kategorien: Sparen = Entnahme, sonst = Erstattung */
+const catFits = (c, type) => c.kind === type || (type === 'income' && c.kind === 'expense');
+const backPrefix = (c, type) => type === 'income' && c && c.kind === 'expense' ? (c.saving ? 'Entnahme ' : 'Erstattung ') : '';
+function sums(list){ let inc = 0, exp = 0, sav = 0; for (const e of list) { if (isWithdrawal(e)) sav -= e.amount || 0; else if (isRefund(e)) exp -= e.amount || 0; else if (e.type === 'income') inc += e.amount || 0; else if (e.type === 'expense') for (const [c, v] of catShares(e)) { if (isSaving(c)) sav += v; else exp += v; } } return {inc, exp, sav, bal:inc - exp - sav}; }
 /* Verteilt total im Verhältnis der Gewichte auf [[Schlüssel, Cent], …]; Rest-Cents gehen an die größten Reste, die Summe stimmt immer genau */
 function spread(parts, total){
   const sum = parts.reduce((a, p) => a + p[1], 0); if (!(sum > 0) || !(total > 0)) return [];
@@ -173,7 +177,7 @@ function catPart(e, has){
   if (keep.length > 1) o.splits = keep.map(([catId, amount]) => ({catId, amount})); else delete o.splits;
   return o;
 }
-function spentByCat(list){ const m = {}; for (const e of list) { if (e.type === 'expense') for (const [c, v] of catShares(e)) m[c] = (m[c] || 0) + v; else if (isWithdrawal(e)) m[e.catId] = (m[e.catId] || 0) - (e.amount || 0); } return m; }
+function spentByCat(list){ const m = {}; for (const e of list) { if (e.type === 'expense') for (const [c, v] of catShares(e)) m[c] = (m[c] || 0) + v; else if (isWithdrawal(e) || isRefund(e)) m[e.catId] = (m[e.catId] || 0) - (e.amount || 0); } return m; }
 function paceOf(k){ const t = today(); if (mkey(t) === k) return parseISO(t).getDate() / dim(k); return k < mkey(t) ? 1 : 0; }
 /* Ampel: über 100 % = überschritten; ab 85 % = knapp; ab dem 10. Tag zusätzlich knapp, wenn der Verbrauch 20 Punkte vor dem Kalender liegt (Fixkosten am Monatsanfang lösen so keinen Fehlalarm aus) */
 function budgetState(spent, budget, pace){ if (!budget) return null; const r = spent / budget; if (r > 1) return 'bad'; if (r >= 0.85 || (pace >= 0.33 && pace < 1 && r > pace + 0.2)) return 'warn'; return 'ok'; }
@@ -189,7 +193,7 @@ function dailyBase(k){
   if (!S.profile.totalBudget && exp.some(isFixedCat)) {
     const ids = new Set(exp.filter(c => !isFixedCat(c)).map(c => c.id));
     return {budget:exp.filter(c => ids.has(c.id)).reduce((a, c) => a + S.profile.budgets[c.id], 0), due:0, hint:' · ohne Fixkosten',
-      spent:l => l.reduce((a, e) => a + (e.type === 'expense' ? catShares(e).reduce((x, [c, v]) => x + (ids.has(c) ? v : 0), 0) : 0), 0)};
+      spent:l => l.reduce((a, e) => a + (e.type === 'expense' ? catShares(e).reduce((x, [c, v]) => x + (ids.has(c) ? v : 0), 0) : isRefund(e) && ids.has(e.catId) ? -e.amount : 0), 0)};
   }
   const t = today(), end = k + '-' + String(dim(k)).padStart(2, '0'); let due = 0;
   for (const r of S.profile.recurring) if (isActive(r) && r.type === 'expense' && !isSaving(r.catId) && (S.profile.totalBudget || S.profile.budgets[r.catId])) due += occurrences(r, addDays(t, 1), end).length * r.amount;

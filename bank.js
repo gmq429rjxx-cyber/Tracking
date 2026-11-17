@@ -64,19 +64,23 @@ export function parseBank(lines, fileName){
 }
 
 function revolut(lines){
-  const hi = lines.findIndex(l => /^Startdatum \|/.test(l));
+  /* zwei Varianten: vorgemerkt („Startdatum | … | Geldausgang“) und gebucht („Datum | … | Geldausgang | Geldeingang | Kontostand“) */
+  const hi = lines.findIndex(l => /^(Start)?[Dd]atum \|/.test(l));
   if (hi < 0) return {ok:false, error:'Revolut: Tabelle nicht gefunden'};
-  const header = lines[hi], row = lines[hi + 1] || '';
+  const header = lines[hi], row = lines[hi + 1] || '', bal = /Kontostand\s*$/.test(header);
   const parts = row.split(' | ');
-  const date = dmy(parts[0]), amt = amountOf(parts[parts.length - 1]);
+  if (bal && parts.length < 4) return {ok:false, error:'Revolut: Betrag oder Kontostand fehlt'};
+  const cut = bal ? 2 : 1;
+  const date = dmy(parts[0]), amt = amountOf(parts[parts.length - cut]);
   if (!date || amt == null) return {ok:false, error:'Revolut: Datum oder Betrag fehlt'};
   const rest = lines.slice(hi + 2, hi + 8);
   const to = rest.find(l => /^An:/.test(l)), from = rest.find(l => /^Von:/.test(l));
   const card = rest.find(l => /^Karte:/.test(l)), auth = rest.find(l => /^Autorisierungscode:/.test(l));
   const income = /Geldeingang/.test(header) && !/Geldausgang/.test(header) || (!!from && !to) || amt < 0 && /Geldeingang/.test(header);
-  const id = auth ? auth.split(':')[1].trim() : hash(date + amt + parts[1]);
+  /* ohne Autorisierungscode: Kontostand macht gleiche Beträge am selben Tag unterscheidbar */
+  const id = auth ? auth.split(':')[1].trim() : hash(date + amt + (bal ? row : parts[1]));
   return {ok:true, bank:'revolut', bankName:'Revolut', id:id + '-' + date, date, amount:Math.abs(amt), type:income ? 'income' : 'expense',
-    merchant:(parts.slice(1, -1).join(' ') || '').trim(), merchantRaw:(to || from || '').replace(/^(An|Von):\s*/, '').trim(),
+    refund:income && !!card, merchant:(parts.slice(1, -cut).join(' ') || '').trim(), merchantRaw:(to || from || '').replace(/^(An|Von):\s*/, '').trim(),
     cardLast4:card ? last4(card.split(':')[1]) : '', cardCode:'', ibanLast4:ibanLast4(lines), pending:false, kind:'card'};
 }
 

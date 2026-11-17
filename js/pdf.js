@@ -160,7 +160,7 @@ function buildReport(o){
   }
   if (o.sec.pers && !o.person && persons().length) {
     const ex = {}, inc = {};
-    for (const e of list) { if (e.type === 'transfer') continue; const sh = personShares(e), t = e.type === 'income' ? inc : ex; for (const [id, v] of Object.entries(sh)) t[id] = (t[id] || 0) + v; }
+    for (const e of list) { if (e.type === 'transfer') continue; if (isWithdrawal(e)) continue; const sh = personShares(e), back = isRefund(e), t = e.type === 'income' && !back ? inc : ex; for (const [id, v] of Object.entries(sh)) t[id] = (t[id] || 0) + (back ? -v : v); }
     const ids = persons().map(p => p.id).concat(ex[''] || inc[''] ? [''] : []);
     h2('Personen (gleichmäßig aufgeteilt)');
     doc.text(M, y, 'Person', {size:8, bold:true, color:PDF_C.muted}); doc.text(M + 300, y, 'Ausgaben', {size:8, bold:true, color:PDF_C.muted, align:'right'}); doc.text(R, y, 'Einnahmen', {size:8, bold:true, color:PDF_C.muted, align:'right'}); y += 5; doc.line(M, y, R, y); y += 12;
@@ -180,7 +180,7 @@ function buildReport(o){
       doc.text(X.date, y, dmy(e.date), {size:8.5});
       doc.text(X.id, y, txId(e), {size:8.5, color:PDF_C.muted});
       doc.text(X.who, y, tr ? 'Umbuchung' : (e.merchant || catById(e.catId).name), {size:8.5, bold:true, maxW:166});
-      doc.text(X.cat, y, tr ? '–' : (isWithdrawal(e) ? 'Entnahme ' : '') + catLabel(e), {size:8.5, maxW:94});
+      doc.text(X.cat, y, tr ? '–' : backPrefix(catById(e.catId), e.type) + catLabel(e), {size:8.5, maxW:94});
       doc.text(X.card, y, tr ? ((cardById(e.cardId) || {}).name || '?') + ' → ' + ((cardById(e.toCardId) || {}).name || '?') : ((cardById(e.cardId) || {}).name || '–'), {size:8.5, maxW:R - 62 - X.card});
       doc.text(R, y, (tr ? '' : e.type === 'income' ? '+ ' : '– ') + money(e.amount), {size:8.5, bold:true, align:'right', color:e.type === 'income' ? PDF_C.ok : PDF_C.fg});
       if (sub) doc.text(X.who, y + 9.5, sub, {size:7.5, color:PDF_C.muted, maxW:R - 62 - X.who});

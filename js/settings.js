@@ -136,7 +136,7 @@ async function exportData(kind, opt){
     return;
   }
   const q = csvCell;
-  const rows = [['ID','Datum','Typ','Betrag','Kategorie','Karte','Händler','Notiz','Personen','Aufteilung']].concat(list.map(e => [txId(e), e.date, isWithdrawal(e) ? 'Entnahme' : e.type === 'income' ? 'Einnahme' : e.type === 'transfer' ? 'Umbuchung' : 'Ausgabe', (e.amount / 100).toFixed(2).replace('.', ','), e.type === 'transfer' ? '' : catById(e.catId).name, ((cardById(e.cardId) || {}).name || '') + (e.type === 'transfer' ? ' → ' + ((cardById(e.toCardId) || {}).name || '') : ''), e.merchant || '', e.note || '', personNames(e).join(', '), isSplit(e) ? catShares(e).map(([c, v]) => catById(c).name + ' ' + (v / 100).toFixed(2).replace('.', ',')).join('; ') : '']));
+  const rows = [['ID','Datum','Typ','Betrag','Kategorie','Karte','Händler','Notiz','Personen','Aufteilung']].concat(list.map(e => [txId(e), e.date, isWithdrawal(e) ? 'Entnahme' : isRefund(e) ? 'Erstattung' : e.type === 'income' ? 'Einnahme' : e.type === 'transfer' ? 'Umbuchung' : 'Ausgabe', (e.amount / 100).toFixed(2).replace('.', ','), e.type === 'transfer' ? '' : catById(e.catId).name, ((cardById(e.cardId) || {}).name || '') + (e.type === 'transfer' ? ' → ' + ((cardById(e.toCardId) || {}).name || '') : ''), e.merchant || '', e.note || '', personNames(e).join(', '), isSplit(e) ? catShares(e).map(([c, v]) => catById(c).name + ' ' + (v / 100).toFixed(2).replace('.', ',')).join('; ') : '']));
   await deliverFile('kassabuch-' + stamp + '.csv', '﻿' + rows.map(r => r.map(q).join(';')).join('\r\n'), 'text/csv');
 }
 function openPlan(d, fname){

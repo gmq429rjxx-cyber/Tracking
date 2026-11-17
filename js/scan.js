@@ -273,7 +273,7 @@ async function onReceiptFiles(files, pre){
   if (!r || typeof r !== 'object' || Array.isArray(r)) r = {};
   const total = num(r.total);
   const type = r.isRefund ? 'income' : 'expense';
-  const okCat = cats().some(c => c.id === r.categoryId && c.kind === type);
+  const okCat = cats().some(c => c.id === r.categoryId && c.kind === 'expense');   // Erstattung: Ausgaben-Kategorie des Kaufs
   const cm = matchCard(r);
   const draft = {type, amount:total != null ? Math.round(Math.abs(total) * 100) : '', date:validISO(r.date) ? r.date : today(), catId:okCat ? r.categoryId : (type === 'income' ? 'einnahmen' : 'sonstiges'), cardId:cm.id, merchant:r.merchant ? shortMerchant(r.merchant) : '', merchantRaw:r.merchant ? String(r.merchant).slice(0, 80) : '', note:r.note ? String(r.note).slice(0, 80) : ''};
   draft.items = normItems(r.items);

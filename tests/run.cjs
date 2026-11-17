@@ -477,6 +477,44 @@ async function addEntry({amount, merchant, cat, card}){
     await page.setInputFiles('#bankInput', {name:'test.pdf', mimeType:'application/pdf', buffer:pdf}); await page.waitForTimeout(2500);
     const t = await page.innerText('#sheetBody'); ok(!/Leser nicht geladen/.test(t), 'PDF-Leser nicht geladen'); ok(/nicht erkannt|Keine|nicht lesbar|Format/i.test(t), t.slice(0, 120));
   });
+  await test('Bank-Parser: Revolut-Erstattung (gebucht, mit Kontostand) wird Einnahme mit Erstattungs-Kennung', async () => {
+    await fresh(); const r = await page.evaluate(async () => { const m = await import('./bank.js');
+      const ref = m.parseBank(['EUR-Kontoauszug', 'Datum | Beschreibung | Geldausgang | Geldeingang | Kontostand', '17.11.2026 | Testshop | 27,22€ | 93,78€', 'Von: Testshop* AB12, Musterstadt', 'Karte: 400000******1111', 'Revolut Bank UAB'], 'a.pdf');
+      const ref2 = m.parseBank(['EUR-Kontoauszug', 'Datum | Beschreibung | Geldausgang | Geldeingang | Kontostand', '17.11.2026 | Testshop | 27,22€ | 66,56€', 'Von: Testshop* AB12, Musterstadt', 'Karte: 400000******1111', 'Revolut Bank UAB'], 'b.pdf');
+      const pay = m.parseBank(['Startdatum | Beschreibung | Geldausgang', '05.11.2026 | Markt | 25,25€', 'An: Markt 1, Musterort', 'Karte: 400000******1111', 'Autorisierungscode: ABC123', 'Revolut Bank UAB'], 'c.pdf');
+      return {ref, ref2, pay}; });
+    ok(r.ref.ok && r.ref.type === 'income' && r.ref.refund && r.ref.amount === 2722 && r.ref.date === '2026-11-17' && r.ref.merchant === 'Testshop' && r.ref.cardLast4 === '1111', JSON.stringify(r.ref));
+    ok(r.ref.id !== r.ref2.id, 'gleiche Beträge am selben Tag dürfen nicht dieselbe ID haben');
+    ok(r.pay.ok && r.pay.type === 'expense' && !r.pay.refund && r.pay.amount === 2525 && r.pay.id === 'ABC123-2026-11-05', 'vorgemerkte Zahlung: ' + JSON.stringify(r.pay));
+  });
+  await test('Erstattung: mindert Ausgaben und Budget der Kategorie, zählt nicht als Einnahme', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.budgets = {shopping:10000}; es.put({id:'r1', type:'expense', amount:6000, catId:'shopping', date:'${today()}', merchant:'Testshop'}); es.put({id:'r2', type:'income', amount:2500, catId:'shopping', date:'${today()}', merchant:'Testshop'}); es.put({id:'r3', type:'income', amount:90000, catId:'gehalt', date:'${today()}', merchant:'Arbeit'}); }`);
+    const r = await page.evaluate(() => { const l = entriesIn(S.month); return {by:spentByCat(l), s:sums(l), ref:isRefund(S.entries.get('r2')), sal:isRefund(S.entries.get('r3')), opt:catOptions('income', 'shopping')}; });
+    ok(r.by.shopping === 3500 && r.s.exp === 3500 && r.s.inc === 90000 && r.ref && !r.sal, JSON.stringify(r.by) + ' ' + JSON.stringify(r.s));
+    ok(/>Erstattung Shopping</.test(r.opt), 'Auswahl ohne „Erstattung …“');
+    await go('eintraege'); ok(/Erstattung Shopping/.test(await page.innerText('#eList [data-id="r2"].row')), 'Liste zeigt die Erstattung nicht');
+    await go('uebersicht'); const ov = (await page.innerText('#view .brow[data-cat="shopping"]')).replace(/\s+/g, ' '); ok(/35/.test(ov), 'Budget Shopping: ' + ov);
+  });
+  await test('Bank-Import: Revolut-Erstattung übernimmt die Kategorie der früheren Käufe', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.cards.push({id:'rv', name:'Revolut', last4:'1111'}); es.put({id:'k1', type:'expense', amount:5000, catId:'shopping', date:'2026-11-01', merchant:'Testshop', cardId:'rv'}); }`);
+    const pdf = (() => { const t = [[20, 190, 'EUR-Kontoauszug'], [20, 170, 'Datum'], [110, 170, 'Beschreibung'], [250, 170, 'Geldausgang'], [340, 170, 'Geldeingang'], [430, 170, 'Kontostand'],
+        [20, 155, '17.11.2026'], [110, 155, 'Testshop'], [340, 155, '27,22'], [430, 155, '93,78'], [110, 140, 'Von: Testshop* AB12, Musterstadt'], [110, 128, 'Karte: 400000******1111'], [20, 60, 'Revolut Bank UAB']];
+      const txt = t.map(([x, y, s]) => 'BT /F1 10 Tf ' + x + ' ' + y + ' Td (' + s + ') Tj ET').join('\n');
+      const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 520 220] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>', '<< /Length ' + txt.length + ' >>\nstream\n' + txt + '\nendstream', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+      let out = '%PDF-1.4\n', offs = []; objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+      const x = out.length; out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
+      return Buffer.from(out, 'latin1'); })();
+    await page.setInputFiles('#bankInput', {name:'erstattung.pdf', mimeType:'application/pdf', buffer:pdf}); await page.waitForTimeout(2500);
+    const t = (await page.innerText('#sheetBody')).replace(/\s+/g, ' ');
+    ok(/Erstattung/.test(t) && /\+ € ?27,22/.test(t), 'Vorschau: ' + t.slice(0, 200));
+    ok((await page.inputValue('#bk-cat-0')) === 'shopping', 'Kategorie nicht übernommen: ' + await page.inputValue('#bk-cat-0'));
+    await page.click('#bk-go'); await page.waitForTimeout(500);
+    const e = (await page.evaluate(DUMP)).entries.find(x => x.id !== 'k1');
+    ok(e && e.type === 'income' && e.catId === 'shopping' && e.amount === 2722 && e.cardId === 'rv', JSON.stringify(e));
+    ok((await page.evaluate(() => spentByCat(allEntries()).shopping)) === 2278, 'Ausgaben Shopping nicht gemindert');
+  });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
     await page.click('[data-act="examples-load"]'); for (const r of ['uebersicht', 'statistik', 'karten']) await go(r);

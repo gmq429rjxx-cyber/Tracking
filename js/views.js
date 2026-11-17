@@ -35,7 +35,7 @@ function entryRow(e, withDate){
   const title = e.merchant || cat.name;
   const pn = personNames(e);
   const cl = catLabel(e);
-  const sub = [isWithdrawal(e) ? 'Entnahme ' + cat.name : cl !== title ? cl : '', pn.length ? pn.join(', ') : '', card ? card.name : (e.cardId ? 'Karte gelöscht' : ''), e.note && !(e.example && e.note === 'Beispiel') ? e.note : ''].filter(Boolean).join(' · ');
+  const sub = [isWithdrawal(e) ? 'Entnahme ' + cat.name : isRefund(e) ? 'Erstattung ' + cat.name : cl !== title ? cl : '', pn.length ? pn.join(', ') : '', card ? card.name : (e.cardId ? 'Karte gelöscht' : ''), e.note && !(e.example && e.note === 'Beispiel') ? e.note : ''].filter(Boolean).join(' · ');
   const inc = e.type === 'income';
   return '<button class="row" data-act="edit" data-id="' + esc(e.id) + '">' + badge(cat) + '<span class="row-main"><span class="row-title">' + esc(title) + (e.bankKeys && e.bankKeys.length ? ' ' + ICON.bank.replace('<svg ', '<svg class="clip" aria-label="Bank-PDF" ') : '') + (e.receipts && e.receipts.length ? ' ' + ICON.clip : '') + (e.pending ? ' <span class="chip info">vorgemerkt</span>' : '') + '</span><span class="row-sub">' + esc(sub || ' ') + '</span></span><span class="row-end"><span class="row-amt ' + (inc ? 'pos' : '') + '">' + (inc ? '+ ' : '− ') + money(e.amount) + (e._full ? '<small>von ' + money(e._full) + '</small>' : '') + '</span>' + (withDate ? '<span class="row-date">' + esc(DAY.format(parseISO(e.date))) + '</span>' : '') + '</span></button>';
 }
@@ -230,7 +230,7 @@ function fillEntries(){
   let h = '<div class="list">';
   for (const [d, arr] of groups) {
     const ds = sums(arr);
-    h += '<div class="dayhead"><span>' + esc(DAY.format(parseISO(d))) + '</span><span class="num">' + (ds.exp ? '− ' + money(ds.exp) : '') + (ds.inc ? (ds.exp ? ' · ' : '') + '+ ' + money(ds.inc) : '') + '</span></div>';
+    h += '<div class="dayhead"><span>' + esc(DAY.format(parseISO(d))) + '</span><span class="num">' + (ds.exp ? (ds.exp > 0 ? '− ' : '+ ') + money(Math.abs(ds.exp)) : '') + (ds.inc ? (ds.exp ? ' · ' : '') + '+ ' + money(ds.inc) : '') + '</span></div>';
     h += arr.map(e => '<div class="swipe"><div class="swipe-act">' + (e.pending ? '<button class="settle" data-act="sw-settle" data-id="' + esc(e.id) + '">Gebucht</button>' : '') + '<button class="del" data-act="sw-del" data-id="' + esc(e.id) + '">Löschen</button></div>' + entryRow(e, false) + '</div>').join('');
   }
   const pend = allEntries().filter(e => e.pending);
@@ -421,7 +421,7 @@ function personsSection(list){
   if (!persons().length) return '';
   const ex = {}, inc = {}, cat = {};
   for (const e of list) { if (e.type === 'transfer') continue; const sh = personShares(e);
-    for (const [id, v] of Object.entries(sh)) { if (isWithdrawal(e)) continue; if (e.type === 'income') inc[id] = (inc[id] || 0) + v; else if (!isSaving(e.catId)) { ex[id] = (ex[id] || 0) + v; const c = cat[id] = cat[id] || {}; for (const [cid, a] of catShares(e)) c[cid] = (c[cid] || 0) + v * a / (e.amount || 1); } } }
+    for (const [id, v] of Object.entries(sh)) { if (isWithdrawal(e)) continue; if (isRefund(e)) { ex[id] = (ex[id] || 0) - v; const c = cat[id] = cat[id] || {}; c[e.catId] = (c[e.catId] || 0) - v; } else if (e.type === 'income') inc[id] = (inc[id] || 0) + v; else if (!isSaving(e.catId)) { ex[id] = (ex[id] || 0) + v; const c = cat[id] = cat[id] || {}; for (const [cid, a] of catShares(e)) c[cid] = (c[cid] || 0) + v * a / (e.amount || 1); } } }
   const ids = persons().map(p => p.id).concat(ex[''] || inc[''] ? [''] : []).filter(id => ex[id] || inc[id]);
   if (!ids.length) return '';
   const max = Math.max(1, ...ids.map(id => ex[id] || 0));

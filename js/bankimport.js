@@ -82,7 +82,7 @@ async function onBankFiles(files){
     const sc = sourceCard(p), cc = p.kind === 'transfer' ? counterCard(p) : topupTarget(p);
     const al = S.profile.merchantAlias[aliasKey(p.merchantRaw || p.merchant)];
     const name = al ? al.name : p.merchant;
-    const hist = al ? null : guessFromHistory(name);
+    const hist = al || (p.type === 'income' && !p.refund) ? null : guessFromHistory(name);   // Erstattung: Kategorie der früheren Käufe
     const row = {p, key, mk:sc.mk, cardId:sc.id, cc, name, catId:al ? al.catId : (hist ? hist.catId : ''), use:true, action:'new'};
     rows.push(row);
   }
@@ -133,7 +133,7 @@ function renderBankReview(rows, skipped, failed){
     return '<div class="irow' + (r.use ? '' : ' off') + '" data-i="' + i + '"><input type="checkbox" id="bk-use-' + i + '"' + (r.use ? ' checked' : '') + ' aria-label="Übernehmen">' +
       (r.action === 'new' && !tr ? '<input class="input name" id="bk-n-' + i + '" value="' + esc(r.name) + '" aria-label="Name">' : '<span class="row-title" style="grid-column:2/3">' + esc(tr ? (p.reference || 'Umbuchung') : r.name) + '</span>') +
       '<span class="row-amt ' + (inc ? 'pos' : tr ? 'muted' : '') + '">' + (inc ? '+ ' : tr ? '' : '− ') + money(p.amount) + '</span>' +
-      '<span class="meta">' + label(r) + (p.pending ? '<span class="chip warn">vorgemerkt</span>' : '') + '<span>' + esc(DAY.format(parseISO(p.date))) + (p.time ? ' ' + esc(p.time) : '') + ' · ' + esc(cardTxt) + '</span>' + (p.fx && p.fx.original ? '<span>' + esc(p.fx.original) + (p.fx.markup ? ', Aufschlag ' + esc(String(p.fx.markup).replace('.', ',')) + ' %' : '') + '</span>' : '') + '</span>' +
+      '<span class="meta">' + label(r) + (p.refund && inc ? '<span class="chip info">Erstattung</span>' : '') + (p.pending ? '<span class="chip warn">vorgemerkt</span>' : '') + '<span>' + esc(DAY.format(parseISO(p.date))) + (p.time ? ' ' + esc(p.time) : '') + ' · ' + esc(cardTxt) + '</span>' + (p.fx && p.fx.original ? '<span>' + esc(p.fx.original) + (p.fx.markup ? ', Aufschlag ' + esc(String(p.fx.markup).replace('.', ',')) + ' %' : '') + '</span>' : '') + '</span>' +
       (r.action === 'new' && !tr ? '<select class="input" id="bk-cat-' + i + '" aria-label="Kategorie"><option value="">Kategorie wählen …</option>' + catOptions(r.type, r.catId) + '</select>' : '') + '</div>';
   };
   openSheet('Bank-PDFs importieren',
@@ -171,10 +171,10 @@ function renderBankReview(rows, skipped, failed){
         read();
         const todo = rows.map((r, i) => ({i, r})).filter(x => x.r.use && x.r.action === 'new' && x.r.type !== 'transfer' && !x.r.catId);
         const list = cats().filter(c => c.kind === 'expense' || c.kind === 'income').map(c => c.id + ' = ' + c.name + ' (' + (c.kind === 'income' ? 'Einnahme' : 'Ausgabe') + ')').join('\n');
-        const prompt = 'Assign each Austrian bank booking text to one category and give a short clean German merchant or payer name (e.g. "TURMOEL 158 2140" -> "Turmöl", "Lidl Dankt 480, Musterort" -> "Lidl"). Expenses must get an Ausgabe category, incomes an Einnahme category.\nCategories (id = name):\n' + list + '\nBookings:\n' + todo.map(x => x.i + ': ' + (x.r.type === 'income' ? '[Einnahme] ' : '[Ausgabe] ') + (x.r.p.merchantRaw || x.r.p.merchant)).join('\n') + '\nReply with only a JSON array: [{"i": number, "categoryId": string, "merchant": string}]';
+        const prompt = 'Assign each Austrian bank booking text to one category and give a short clean German merchant or payer name (e.g. "TURMOEL 158 2140" -> "Turmöl", "Lidl Dankt 480, Musterort" -> "Lidl"). Expenses must get an Ausgabe category, incomes an Einnahme category, refunds (money back from a shop) the Ausgabe category of the original purchase.\nCategories (id = name):\n' + list + '\nBookings:\n' + todo.map(x => x.i + ': ' + (x.r.p.refund ? '[Erstattung] ' : x.r.type === 'income' ? '[Einnahme] ' : '[Ausgabe] ') + (x.r.p.merchantRaw || x.r.p.merchant)).join('\n') + '\nReply with only a JSON array: [{"i": number, "categoryId": string, "merchant": string}]';
         await aiSuggest(ai, $('#bk-ai-st', root), prompt, x => {
           const r = rows[Number(x.i)]; if (!r) return;
-          if (cats().some(c => c.id === x.categoryId && c.kind === r.type)) { r.catId = x.categoryId; const sel = $('#bk-cat-' + x.i, root); if (sel) sel.value = x.categoryId; }
+          if (cats().some(c => c.id === x.categoryId && catFits(c, r.type) && (c.kind === r.type || r.p.refund))) { r.catId = x.categoryId; const sel = $('#bk-cat-' + x.i, root); if (sel) sel.value = x.categoryId; }
           if (x.merchant) { r.name = String(x.merchant).slice(0, 80); const n = $('#bk-n-' + x.i, root); if (n) n.value = r.name; }
         }, read);
       };
