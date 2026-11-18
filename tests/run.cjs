@@ -466,9 +466,25 @@ async function addEntry({amount, merchant, cat, card}){
     const imgs = c.filter(p => p.type === 'image'), docs = c.filter(p => p.type === 'document');
     ok(docs.length === 0 && imgs.length >= 3 && imgs.length <= 5, 'Abschnitte: ' + imgs.length + ' Bilder, ' + docs.length + ' PDF');
     ok(/consecutive slices of ONE long receipt/.test(c[0] && c[0].text || ''), 'Hinweis auf die Abschnitte fehlt');
-    ok(lastAsk.max_tokens >= 16000, 'zu wenig Platz für lange Belege: ' + lastAsk.max_tokens);
+    ok(lastAsk.max_tokens >= 32000, 'zu wenig Platz für lange Belege: ' + lastAsk.max_tokens);
     await page.click('#f-save'); await page.waitForTimeout(500);
     const d = await page.evaluate(DUMP); ok((d.entries[0].receipts || [])[0] && d.entries[0].receipts[0].pdf === true, 'Original-PDF nicht als Beleg gespeichert');
+  });
+  await test('Großer Einkauf: alle 130 Positionen bleiben, 4,9 % USt gilt als normaler Satz', async () => {
+    await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    const items = []; for (let i = 0; i < 65; i++) items.push({name:'ARTIKEL ' + i, clean:'Artikel ' + i, group:'Vorrat & Konserven', cat:'lebensmittel', qty:1, total:2, kind:'item'}, {name:'Lidl Plus Rabatt', clean:'Rabatt', group:'Sonstiges', cat:'lebensmittel', qty:1, total:-0.1, kind:'discount'});
+    scanReply = Object.assign({}, FAKE_SCAN, {total:123.5, receiptNo:'7777', savingsPrinted:null, items, vat:[{rate:4.9, net:117.73, tax:5.77, gross:123.5}]});
+    try {
+      const pr = await page.evaluate(() => scanPrompt());
+      ok(!/at most 60/.test(pr) && /List EVERY line/.test(pr) && /4\.9/.test(pr), 'Prompt begrenzt noch die Positionen');
+      await go('uebersicht'); await page.setInputFiles('#receiptInput', {name:'gross.png', mimeType:'image/png', buffer:TINY_PNG});
+      for (let i = 0; i < 20 && !(await page.$('#f-save')); i++) await page.waitForTimeout(250);
+      const t = await page.innerText('#sheet');
+      ok(!/Steuersatz 4\.9 % ist ungewöhnlich/.test(t), '4,9 % wird noch als ungewöhnlich gemeldet');
+      ok(/Positionen \(130\)/.test(t), 'Positionen gekürzt: ' + (t.match(/Positionen \(\d+\)/) || ['?'])[0]);
+      await page.click('#f-save'); await page.waitForTimeout(500);
+      const e = (await page.evaluate(DUMP)).entries[0]; ok(e.items.length === 130, 'gespeichert: ' + e.items.length);
+    } finally { scanReply = null; }
   });
   await test('Mehrere Belege: Warteschlange, Überspringen, Zähler', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
