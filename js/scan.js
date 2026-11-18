@@ -5,12 +5,73 @@ async function toJpeg(file){
   const url = URL.createObjectURL(file);
   try {
     const img = new Image(); img.src = url; await img.decode();
-    const max = 1800, w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+    const w = img.naturalWidth, h = img.naturalHeight;
+    /* sehr hohe Bilder (ganzseitiger Screenshot) nicht auf 1800 px Höhe stauchen, sonst ist die Schrift weg; die KI bekommt sie später in Abschnitten */
+    const s = h / w > 2.2 ? Math.min(1, 1000 / w, Math.sqrt(14e6 / (w * h))) : Math.min(1, 1800 / Math.max(w, h));
     const cv = document.createElement('canvas'); cv.width = Math.round(w * s); cv.height = Math.round(h * s);
     cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
     const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.86));
     return blob || file;
   } catch (_) { return file; } finally { URL.revokeObjectURL(url); }
+}
+/* ---------- Lange Belege in lesbare Abschnitte schneiden ----------
+   Ein Lidl-Plus-Export oder ganzseitiger Screenshot ist ein schmales, sehr hohes Bild. Als Ganzes (oder als PDF-Seite) schrumpft es so stark,
+   dass die KI kaum eine Zeile lesen kann. Darum in Abschnitte von 1000 px Breite schneiden, jeweils an einer leeren Zeile, ohne Überlappung. */
+const TILE_W = 1000, TILE_H = 1600;
+const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+function blankRow(cx, W, H, aim){
+  const from = Math.round(aim * 0.75); if (from >= H) return 0;
+  const d = cx.getImageData(0, from, W, H - from).data;
+  const blank = r => { for (let x = 0; x < W; x += 2) { const i = (r * W + x) * 4; if (Math.min(d[i], d[i + 1], d[i + 2]) < 200) return false; } return true; };
+  for (let r = aim - from; r < H - from; r++) if (blank(r)) return r + from;   // zuerst knapp unter dem Ziel …
+  for (let r = aim - from - 1; r > 0; r--) if (blank(r)) return r + from;      // … sonst darüber
+  return 0;
+}
+/* draw(cx, y, hh, W, H): Quellbereich y … y+hh auf W×H zeichnen */
+async function sliceTall(w, h, draw){
+  const f = Math.min(1, TILE_W / w), W = Math.max(1, Math.round(w * f)), out = [];
+  for (let y = 0; y < h - 2 && out.length < 30; ) {
+    const hh = Math.min(h - y, Math.ceil((TILE_H + 300) / f)), H = Math.max(1, Math.round(hh * f));
+    const cv = mkCanvas(W, H), cx = cv.getContext('2d', {willReadFrequently:true});
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H); draw(cx, y, hh, W, H);
+    const cut = y + hh >= h ? H : (blankRow(cx, W, H, TILE_H) || Math.min(H, TILE_H));
+    const t = mkCanvas(W, cut); t.getContext('2d').drawImage(cv, 0, 0, W, cut, 0, 0, W, cut);
+    const b = await new Promise(r => t.toBlob(r, 'image/jpeg', 0.85)); if (b) out.push(b);
+    y += Math.max(1, Math.round(cut / f));
+  }
+  return out;
+}
+/* Pixeldaten aus pdf.js (1 = s/w, 2 = RGB, 3 = RGBA) zeilenweise zeichnen – nie das ganze Bild auf einmal (Canvas-Grenze auf dem iPhone) */
+const rawDraw = img => (cx, y, hh, W, H) => {
+  const w = img.width, src = img.data, id = new ImageData(w, hh), px = id.data;
+  if (img.kind === 3) px.set(src.subarray(y * w * 4, (y + hh) * w * 4));
+  else for (let r = 0; r < hh; r++) for (let x = 0; x < w; x++) {
+    const o = (r * w + x) * 4;
+    if (img.kind === 2) { const s = ((y + r) * w + x) * 3; px[o] = src[s]; px[o + 1] = src[s + 1]; px[o + 2] = src[s + 2]; }
+    else { const v = (src[(y + r) * ((w + 7) >> 3) + (x >> 3)] >> (7 - (x & 7))) & 1 ? 255 : 0; px[o] = px[o + 1] = px[o + 2] = v; }
+    px[o + 3] = 255;
+  }
+  const t = mkCanvas(w, hh); t.getContext('2d').putImageData(id, 0, 0); cx.drawImage(t, 0, 0, w, hh, 0, 0, W, H);
+};
+/* Was die KI bekommt: Text-PDFs und normale Fotos unverändert, Bild-PDFs und sehr hohe Bilder als Abschnitte */
+async function aiParts(blobs){
+  const out = [];
+  for (const b of blobs) {
+    try {
+      if (b.type === 'application/pdf') {
+        const mod = await import(new URL('bank.js', document.baseURI).href);
+        const imgs = await mod.pdfImages(await b.arrayBuffer());
+        if (!imgs) { out.push(b); continue; }
+        for (const img of imgs) out.push(...await sliceTall(img.width, img.height, rawDraw(img)));
+      } else {
+        const bmp = await createImageBitmap(b);
+        if (bmp.height / bmp.width > 2.2) out.push(...await sliceTall(bmp.width, bmp.height, (cx, y, hh, W, H) => cx.drawImage(bmp, 0, y, bmp.width, hh, 0, 0, W, H)));
+        else out.push(b);
+        if (bmp.close) bmp.close();
+      }
+    } catch (_) { out.push(b); }
+  }
+  return out.slice(0, 40);
 }
 const ITEM_GROUPS = ['Getränke','Obst & Gemüse','Brot & Gebäck','Milch & Käse','Fleisch & Wurst','Fisch','Tiefkühl','Vorrat & Konserven','Süßes & Snacks','Alkohol','Drogerie & Hygiene','Haushalt & Reinigung','Baby & Kind','Tier','Pfand','Sonstiges'];
 function normItems(list){
@@ -151,13 +212,15 @@ let scanCtl = null;
 const MODELS = {'claude-haiku-5-5':'Haiku 5.5 – schnell, unter 0,1 Cent pro Beleg', 'claude-sonnet-5-5':'Sonnet 5.5 – genauer, ca. 1 Cent pro Beleg'};
 const toB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
 async function askClaude(blobs, prompt, signal, model){
-  const content = [];
+  const content = [], parts = await aiParts(blobs);
+  if (parts.length > blobs.length) content.push({type:'text', text:'The following ' + parts.length + ' images are consecutive slices of ONE long receipt, from top to bottom, cut between lines without overlap. Read every slice and treat them as one document.'});
+  blobs = parts;
   for (const b of blobs) content.push(b.type === 'application/pdf' ? {type:'document', source:{type:'base64', media_type:'application/pdf', data:await toB64(b)}} : {type:'image', source:{type:'base64', media_type:b.type && b.type.startsWith('image/') ? b.type : 'image/jpeg', data:await toB64(b)}});
   content.push({type:'text', text:prompt});
   let res;
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal, referrerPolicy:'no-referrer', headers:{'content-type':'application/json', 'x-api-key':SET.apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:model || SET.model || 'claude-haiku-5-5', max_tokens:6000, messages:[{role:'user', content}]})});
+      body:JSON.stringify({model:model || SET.model || 'claude-haiku-5-5', max_tokens:16000, messages:[{role:'user', content}]})});
   } catch (e) { if (e && e.name === 'AbortError') throw {code:'cancelled'}; throw {code:'network'}; }
   let body = null; try { body = await res.json(); } catch (_) {}
   if (!res.ok) {

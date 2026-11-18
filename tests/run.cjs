@@ -446,6 +446,30 @@ async function addEntry({amount, merchant, cat, card}){
     await page.click('#f-save'); await page.waitForTimeout(500);
     const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && (d.entries[0].receipts || []).length === 1 && d.entries[0].receipts[0].pdf === true, 'Eintrag mit PDF-Beleg fehlt: ' + JSON.stringify(d.entries[0] || null).slice(0, 200));
   });
+  await test('Langer Bild-Beleg (PDF mit hohem Bild): KI bekommt lesbare Abschnitte statt einer Mini-Seite', async () => {
+    await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    /* 200 × 5000 px, weiß mit dunklen „Zeilen“: 20 px Text, 20 px Abstand – wie ein Kassenbon */
+    const w = 200, h = 5000, px = Buffer.alloc(w * h * 3, 255);
+    for (let y = 0; y < h; y++) if (y % 40 < 20) for (let x = 10; x < 190; x++) { const o = (y * w + x) * 3; px[o] = px[o + 1] = px[o + 2] = 30; }
+    const cont = 'q 30 0 0 750 100 40 cm /Im1 Do Q', parts = [];
+    const objs = [Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'), Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+      Buffer.from('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>'),
+      Buffer.from('<< /Length ' + cont.length + ' >>\nstream\n' + cont + '\nendstream'),
+      Buffer.concat([Buffer.from('<< /Type /XObject /Subtype /Image /Width ' + w + ' /Height ' + h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ' + px.length + ' >>\nstream\n'), px, Buffer.from('\nendstream')])];
+    let len = 0; const offs = []; const push = b => { parts.push(b); len += b.length; };
+    push(Buffer.from('%PDF-1.4\n')); objs.forEach((o, i) => { offs.push(len); push(Buffer.from((i + 1) + ' 0 obj\n')); push(o); push(Buffer.from('\nendobj\n')); });
+    const x = len; push(Buffer.from('xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF'));
+    lastAsk = null; await go('uebersicht');
+    await page.setInputFiles('#receiptInput', {name:'lang.pdf', mimeType:'application/pdf', buffer:Buffer.concat(parts)});
+    for (let i = 0; i < 30 && !(await page.$('#f-save')); i++) await page.waitForTimeout(300);
+    const c = lastAsk ? lastAsk.messages[0].content : [];
+    const imgs = c.filter(p => p.type === 'image'), docs = c.filter(p => p.type === 'document');
+    ok(docs.length === 0 && imgs.length >= 3 && imgs.length <= 5, 'Abschnitte: ' + imgs.length + ' Bilder, ' + docs.length + ' PDF');
+    ok(/consecutive slices of ONE long receipt/.test(c[0] && c[0].text || ''), 'Hinweis auf die Abschnitte fehlt');
+    ok(lastAsk.max_tokens >= 16000, 'zu wenig Platz für lange Belege: ' + lastAsk.max_tokens);
+    await page.click('#f-save'); await page.waitForTimeout(500);
+    const d = await page.evaluate(DUMP); ok((d.entries[0].receipts || [])[0] && d.entries[0].receipts[0].pdf === true, 'Original-PDF nicht als Beleg gespeichert');
+  });
   await test('Mehrere Belege: Warteschlange, Überspringen, Zähler', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
     await go('uebersicht'); const f = n => ({name:'bon' + n + '.png', mimeType:'image/png', buffer:TINY_PNG});

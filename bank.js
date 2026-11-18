@@ -53,6 +53,28 @@ const after = (lines, re) => lines.findIndex(l => re.test(l));
 const titleCase = s => s.toLowerCase().replace(/(^|[\s\-/.&])([a-zäöüß])/g, (m, a, b) => a + b.toUpperCase());
 
 /** Erkennt die Bank und liest eine Transaktion. */
+/** Bild-PDF (z. B. ganzseitiger iOS-Screenshot eines App-Belegs): das größte Bild jeder Seite als Pixeldaten.
+    null, wenn die PDF echten Text hat – dann liest die KI sie direkt. */
+export async function pdfImages(buffer){
+  const doc = await pdfjs.getDocument({data:new Uint8Array(buffer), isEvalSupported:false, disableFontFace:true, isOffscreenCanvasSupported:false}).promise;
+  const out = [];
+  for (let i = 1; i <= Math.min(doc.numPages, 10); i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    if (tc.items.filter(t => t.str && t.str.trim()).length > 15) return null;
+    const ops = await page.getOperatorList();
+    let best = null;
+    for (let k = 0; k < ops.fnArray.length; k++) {
+      if (ops.fnArray[k] !== pdfjs.OPS.paintImageXObject) continue;
+      const id = ops.argsArray[k][0];
+      const img = await new Promise(res => (String(id).startsWith('g_') ? page.commonObjs : page.objs).get(id, res));
+      if (img && img.data && [1, 2, 3].includes(img.kind) && (!best || img.width * img.height > best.width * best.height)) best = img;
+    }
+    if (best && best.width >= 200 && best.height >= 200) out.push({width:best.width, height:best.height, kind:best.kind, data:best.data});
+  }
+  return out.length ? out : null;
+}
+
 export function parseBank(lines, fileName){
   const text = lines.join('\n');
   try {
