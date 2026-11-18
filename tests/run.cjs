@@ -25,7 +25,7 @@ const SWIPE = ([sel, dx, hold]) => new Promise(res => { const el = document.quer
     el.dispatchEvent(ev); };
   mk('touchstart', x); setTimeout(() => { for (let i = 1; i <= 6; i++) if (dx) mk('touchmove', x + dx * i / 6); mk('touchend', x + dx); res(); }, hold || 30); });
 
-const results = []; let page, ctx, browser, base, pageErrors = [], scanReply = null;   // scanReply: abweichende KI-Antwort für einen Test
+const results = []; let page, ctx, browser, base, pageErrors = [], scanReply = null, lastAsk = null;   // lastAsk: zuletzt an die KI geschickte Anfrage   // scanReply: abweichende KI-Antwort für einen Test
 const ok = (c, m) => { if (!c) throw new Error(m); };
 async function test(name, fn){ if (process.env.ONLY && !name.includes(process.env.ONLY)) return;   // ONLY=Teil des Namens: nur diese Tests
   const t0 = Date.now(); try { await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeitüberschreitung nach 90 s')), 90000))]); results.push([true, name, Date.now() - t0]); console.log('  ✓ ' + name); } catch (e) { results.push([false, name, e.message]); console.log('  ✗ ' + name + '\n      ' + e.message.split('\n')[0]); } }
@@ -37,7 +37,7 @@ async function fresh(opts = {}){
   else {
     if (ctx) await ctx.close();
     ctx = wk ? await engine.launchPersistentContext(fs.mkdtempSync(path.join(require('os').tmpdir(), 'kb-wk-')), copt) : await browser.newContext(copt);
-    await ctx.route('https://api.anthropic.com/**', r => r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(scanReply || FAKE_SCAN)}]})}));
+    await ctx.route('https://api.anthropic.com/**', r => { try { lastAsk = JSON.parse(r.request().postData() || 'null'); } catch (_) { lastAsk = null; } return r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(scanReply || FAKE_SCAN)}]})}); });
   }
   page = await ctx.newPage(); page.setDefaultTimeout(5000); page.on('pageerror', e => pageErrors.push(String(e)));
   if (wk) {
@@ -430,6 +430,21 @@ async function addEntry({amount, merchant, cat, card}){
     await page.evaluate(async () => { const e = clean(S.entries.get('m1')); delete e.splits; await saveEntry(e); });
     await page.reload(); await page.waitForTimeout(700);
     ok(!(await page.evaluate(() => S.entries.get('m1').splits)), 'Aufteilung kam von selbst wieder');
+  });
+  await test('Beleg-Button: PDF aus Dateien wird angenommen und als Dokument an die KI geschickt', async () => {
+    await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    ok(/application\/pdf/.test(await page.getAttribute('#receiptInput', 'accept')), 'Auswahl lässt keine PDFs zu');
+    const txt = 'BT /F1 12 Tf 20 100 Td (Rechnung 12,50 EUR) Tj ET';
+    const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>', '<< /Length ' + txt.length + ' >>\nstream\n' + txt + '\nendstream', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+    let out = '%PDF-1.4\n', offs = []; objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+    const x = out.length; out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
+    lastAsk = null; await go('uebersicht');
+    await page.setInputFiles('#receiptInput', {name:'rechnung.pdf', mimeType:'application/pdf', buffer:Buffer.from(out, 'latin1')});
+    for (let i = 0; i < 16 && !(await page.$('#f-save')); i++) await page.waitForTimeout(250);
+    const parts = lastAsk && lastAsk.messages[0].content.map(c => c.type + ':' + (c.source ? c.source.media_type : '')).join();
+    ok(/document:application\/pdf/.test(parts || ''), 'KI bekam kein PDF: ' + parts);
+    await page.click('#f-save'); await page.waitForTimeout(500);
+    const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && (d.entries[0].receipts || []).length === 1 && d.entries[0].receipts[0].pdf === true, 'Eintrag mit PDF-Beleg fehlt: ' + JSON.stringify(d.entries[0] || null).slice(0, 200));
   });
   await test('Mehrere Belege: Warteschlange, Überspringen, Zähler', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);

@@ -200,7 +200,7 @@ const scanTitle = () => S.scanQ ? 'Beleg ' + S.scanQ.i + ' von ' + S.scanQ.n : '
 function pickScanMode(files){
   if (files.length < 2) return onReceiptFiles(files);
   if (files.length > 20) { toast('Höchstens 20 Belege auf einmal – die ersten 20 werden verarbeitet.'); files = files.slice(0, 20); }
-  openSheet(files.length + ' Fotos', '<p class="note" style="margin:0">Sind das getrennte Einkäufe oder Seiten eines Belegs?</p><button class="btn primary" id="sm-each" style="width:100%">' + files.length + ' einzelne Belege</button><button class="btn" id="sm-one" style="width:100%">Ein Beleg mit ' + files.length + ' Seiten</button>',
+  openSheet(files.length + (files.some(f => f.type === 'application/pdf') ? ' Dateien' : ' Fotos'), '<p class="note" style="margin:0">Sind das getrennte Einkäufe oder Seiten eines Belegs?</p><button class="btn primary" id="sm-each" style="width:100%">' + files.length + ' einzelne Belege</button><button class="btn" id="sm-one" style="width:100%">Ein Beleg mit ' + files.length + ' Seiten</button>',
     root => { $('#sm-each', root).onclick = () => scanBatch(files); $('#sm-one', root).onclick = () => onReceiptFiles(files); });
 }
 function scanBatch(files){
