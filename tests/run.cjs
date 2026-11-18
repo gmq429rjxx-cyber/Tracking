@@ -549,7 +549,7 @@ async function addEntry({amount, merchant, cat, card}){
       const x = out.length; out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offs.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('') + 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + x + '\n%%EOF';
       return Buffer.from(out, 'latin1'); })();
     await page.setInputFiles('#bankInput', {name:'2026-10-12_Buchung_987.pdf', mimeType:'application/pdf', buffer:pdf});
-    for (let i = 0; i < 20 && /Lese \d/.test(await page.innerText('#sheetBody')); i++) await page.waitForTimeout(500);
+    for (let i = 0; i < 30 && !(await page.$('#bk-go')); i++) await page.waitForTimeout(400);   // warten, bis die Vorschau steht (CI ist langsamer)
     const t = (await page.innerText('#sheetBody')).replace(/\s+/g, ' ');
     ok(/Umbuchung/.test(t) && /Trade Republic/.test(t), 'Vorschau: ' + t.slice(0, 240));
     ok((await page.inputValue('#bk-cp-0')) === 'trk', 'Gegenkonto nicht vorgeschlagen');
