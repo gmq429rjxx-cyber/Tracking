@@ -1,7 +1,7 @@
 // Kassabuch Service Worker: hält die App offline verfügbar. Finanzdaten liegen in IndexedDB, nicht hier.
 // Bei jedem Release CACHE und version.json/APP_VERSION gemeinsam erhöhen.
-const CACHE = 'kassabuch-2026.11.24-1';
-const SHELL = ['./', './index.html', './app.css', './js/boot.js', './js/core.js', './js/motion.js', './js/data.js', './js/views.js', './js/sheets.js', './js/scan.js', './js/bankimport.js', './js/settings.js', './js/pdf.js', './js/events.js',
+const CACHE = 'kassabuch-2026.11.24-2';
+const SHELL = ['./', './index.html', './app.css', './js/boot.js', './js/core.js', './js/motion.js', './js/data.js', './js/views.js', './js/sheets.js', './js/scan.js', './js/bankimport.js', './js/settings.js', './js/pdf.js', './js/assistant.js', './js/events.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, {cache: 'reload'})))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

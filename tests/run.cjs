@@ -25,7 +25,7 @@ const SWIPE = ([sel, dx, hold]) => new Promise(res => { const el = document.quer
     el.dispatchEvent(ev); };
   mk('touchstart', x); setTimeout(() => { for (let i = 1; i <= 6; i++) if (dx) mk('touchmove', x + dx * i / 6); mk('touchend', x + dx); res(); }, hold || 30); });
 
-const results = []; let page, ctx, browser, base, pageErrors = [], scanReply = null, lastAsk = null;   // lastAsk: zuletzt an die KI geschickte Anfrage   // scanReply: abweichende KI-Antwort für einen Test
+const results = []; let page, ctx, browser, base, pageErrors = [], scanReply = null, lastAsk = null, chatReplies = [], askLog = [];   // chatReplies: vorgegebene Antworten für den Assistenten   // lastAsk: zuletzt an die KI geschickte Anfrage   // scanReply: abweichende KI-Antwort für einen Test
 const ok = (c, m) => { if (!c) throw new Error(m); };
 async function test(name, fn){ if (process.env.ONLY && !name.includes(process.env.ONLY)) return;   // ONLY=Teil des Namens: nur diese Tests
   const t0 = Date.now(); try { await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeitüberschreitung nach 90 s')), 90000))]); results.push([true, name, Date.now() - t0]); console.log('  ✓ ' + name); } catch (e) { results.push([false, name, e.message]); console.log('  ✗ ' + name + '\n      ' + e.message.split('\n')[0]); } }
@@ -37,7 +37,8 @@ async function fresh(opts = {}){
   else {
     if (ctx) await ctx.close();
     ctx = wk ? await engine.launchPersistentContext(fs.mkdtempSync(path.join(require('os').tmpdir(), 'kb-wk-')), copt) : await browser.newContext(copt);
-    await ctx.route('https://api.anthropic.com/**', r => { try { lastAsk = JSON.parse(r.request().postData() || 'null'); } catch (_) { lastAsk = null; } return r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(scanReply || FAKE_SCAN)}]})}); });
+    await ctx.route('https://api.anthropic.com/**', r => { try { lastAsk = JSON.parse(r.request().postData() || 'null'); } catch (_) { lastAsk = null; } if (lastAsk && lastAsk.tools) { askLog.push(lastAsk); const c = chatReplies.shift() || {stop_reason:'end_turn', content:[{type:'text', text:'ok'}]}; return r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify(Object.assign({id:'x', type:'message', role:'assistant', model:'test', usage:{input_tokens:1, output_tokens:1}}, c))}); }
+      return r.fulfill({status:200, contentType:'application/json', headers:{'access-control-allow-origin':'*'}, body:JSON.stringify({id:'x', type:'message', role:'assistant', model:'test', stop_reason:'end_turn', usage:{input_tokens:1, output_tokens:1}, content:[{type:'text', text:JSON.stringify(scanReply || FAKE_SCAN)}]})}); });
   }
   page = await ctx.newPage(); page.setDefaultTimeout(5000); page.on('pageerror', e => pageErrors.push(String(e)));
   if (wk) {
@@ -612,6 +613,34 @@ async function addEntry({amount, merchant, cat, card}){
     ok(/Geldfluss/.test(t) && /Überschuss € ?2\.350/.test(t), 'Abschnitt: ' + (t.match(/Geldfluss.{0,200}/) || [''])[0]);
     await page.click('[data-act="flow-mode"][data-mode="cat"]'); await page.waitForTimeout(200);
     ok(/Kinder € ?100/.test((await page.innerText('#view')).replace(/\s+/g, ' ')), 'Kategorien-Ansicht fehlt');
+  });
+  await test('KI-Assistent: fragt Daten über Werkzeuge ab, schickt keine Notizen/Personen/Karten, zeigt was abgerufen wurde', async () => {
+    await fresh();
+    ok(await page.isHidden('#aiBtn'), 'Knopf ohne API-Key sichtbar');
+    await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    await seed(`(p, es) => { p.cards.push({id:'kk', name:'Testkarte', last4:'4321'}); p.persons = [{id:'px', name:'Testperson'}];
+      es.put({id:'q1', type:'expense', amount:5000, catId:'lebensmittel', date:'${today()}', merchant:'Markt', note:'GEHEIM-NOTIZ', cardId:'kk', persons:['px']});
+      es.put({id:'q2', type:'expense', amount:1200, catId:'freizeit', date:'${today()}', merchant:'Kino', note:'GEHEIM-NOTIZ'}); }`);
+    const m = today().slice(0, 7); askLog = [];
+    chatReplies = [{stop_reason:'tool_use', content:[{type:'text', text:'Ich schaue nach.'}, {type:'tool_use', id:'t1', name:'bookings', input:{from:m, to:m, merchant:'markt'}}]},
+      {stop_reason:'end_turn', content:[{type:'text', text:'Bei Markt waren es **50,00 €**.\n- eine Buchung\n<img src=x onerror=alert(1)>'}]}];
+    await page.click('#aiBtn'); await page.waitForTimeout(300);
+    await page.fill('#chatIn', 'Was habe ich bei Markt ausgegeben?'); await page.click('#chatGo');
+    for (let i = 0; i < 20 && !(await page.$('.msg-src')); i++) await page.waitForTimeout(200);
+    const ans = await page.innerHTML('.msg.ai:last-child');
+    ok(/<b>50,00 €<\/b>/.test(ans) && /<li>eine Buchung<\/li>/.test(ans) && !/<img/.test(ans), 'Antwort-Darstellung: ' + ans.slice(0, 200));
+    ok(/Abgerufen: Buchungen/.test(await page.innerText('.msg-src')), 'Herkunft fehlt');
+    ok(askLog.length === 2, 'Anfragen: ' + askLog.length);
+    const tools = askLog[0].tools.map(t => t.name).join();
+    ok(tools === 'summary,bookings,items,recurring,marked', 'Werkzeuge: ' + tools);
+    const res = JSON.parse(askLog[1].messages[2].content[0].content);
+    ok(res.count === 1 && res.rows[0].merchant === 'Markt' && res.rows[0].amount === 50 && res.rows[0].category === 'Lebensmittel' && Object.keys(res.rows[0]).join() === 'date,amount,type,merchant,category', 'Werkzeug-Ergebnis: ' + JSON.stringify(res));
+    const all = JSON.stringify(askLog);
+    ok(!/GEHEIM|Testperson|4321|Testkarte/.test(all), 'private Daten wurden mitgeschickt');
+    /* zweite Frage im selben Gespräch: Verlauf geht mit, ohne Anzeige-Felder */
+    chatReplies = [{stop_reason:'end_turn', content:[{type:'text', text:'Passt.'}]}]; askLog = [];
+    await page.fill('#chatIn', 'Danke'); await page.click('#chatGo'); await page.waitForTimeout(600);
+    ok(askLog.length === 1 && askLog[0].messages.length === 5 && askLog[0].messages.every(x => Object.keys(x).join() === 'role,content'), 'Verlauf: ' + JSON.stringify(askLog[0] && askLog[0].messages.map(x => Object.keys(x))));
   });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
