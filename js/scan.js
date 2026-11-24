@@ -1,17 +1,43 @@
 // Kassabuch – Beleg-Scan mit Claude, Apple-Pay-Inbox
 'use strict';
 /* ---------- receipt scan ---------- */
+/* Speichergröße der Belege: 1600 px, JPEG-Qualität 0,75 – gut lesbar, etwa halb so groß wie vorher. Lange Bons 900 px breit. */
+const IMG_MAX = 1600, IMG_TALL_W = 900, IMG_Q = 0.75;
+/* Bild-PDF (z. B. Lidl-Plus-Export als ganzseitiger Screenshot) als kompaktes JPEG je Seite speichern; Text-PDFs bleiben unverändert */
+async function compactPdf(file){
+  try {
+    const mod = await import(new URL('bank.js', document.baseURI).href);
+    const imgs = await mod.pdfImages(await file.arrayBuffer());
+    if (!imgs) return [file];
+    const out = [];
+    for (const img of imgs.slice(0, 10)) {
+      const tall = img.height / img.width > 2.2;
+      const f = Math.min(1, tall ? IMG_TALL_W / img.width : IMG_MAX / Math.max(img.width, img.height), Math.sqrt(14e6 / (img.width * img.height)));
+      const W = Math.max(1, Math.round(img.width * f)), H = Math.max(1, Math.round(img.height * f));
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H);
+      const draw = rawDraw(img);
+      for (let y = 0; y < img.height; y += 2000) { const hh = Math.min(2000, img.height - y); cx.save(); cx.translate(0, y * f); draw(cx, y, hh, W, hh * f); cx.restore(); }
+      const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', IMG_Q)); if (!b) return [file];
+      out.push(b);
+    }
+    const sum = out.reduce((a, b) => a + b.size, 0);
+    return out.length && sum < file.size ? out : [file];
+  } catch (_) { return [file]; }
+}
+/* Was von einer gewählten Datei gespeichert wird: Fotos verkleinert, Bild-PDFs als JPEG, Text-PDFs unverändert */
+async function storeForm(f){ return f.type === 'application/pdf' ? compactPdf(f) : [await toJpeg(f)]; }
 async function toJpeg(file){
   const url = URL.createObjectURL(file);
   try {
     const img = new Image(); img.src = url; await img.decode();
     const w = img.naturalWidth, h = img.naturalHeight;
     /* sehr hohe Bilder (ganzseitiger Screenshot) nicht auf 1800 px Höhe stauchen, sonst ist die Schrift weg; die KI bekommt sie später in Abschnitten */
-    const s = h / w > 2.2 ? Math.min(1, 1000 / w, Math.sqrt(14e6 / (w * h))) : Math.min(1, 1800 / Math.max(w, h));
+    const s = h / w > 2.2 ? Math.min(1, IMG_TALL_W / w, Math.sqrt(14e6 / (w * h))) : Math.min(1, IMG_MAX / Math.max(w, h));
     const cv = document.createElement('canvas'); cv.width = Math.round(w * s); cv.height = Math.round(h * s);
     cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.86));
-    return blob || file;
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', IMG_Q));
+    return blob && blob.size < file.size ? blob : file.type === 'image/jpeg' ? file : (blob || file);
   } catch (_) { return file; } finally { URL.revokeObjectURL(url); }
 }
 /* ---------- Lange Belege in lesbare Abschnitte schneiden ----------
@@ -268,7 +294,7 @@ function pickScanMode(files){
     root => { $('#sm-each', root).onclick = () => scanBatch(files); $('#sm-one', root).onclick = () => onReceiptFiles(files); });
 }
 function scanBatch(files){
-  const prep = j => j.p || (j.p = (async () => { const b = j.f.type === 'application/pdf' ? j.f : await toJpeg(j.f); try { return {blobs:[b], r:await askClaude([b], scanPrompt())}; } catch (e) { return {blobs:[b], err:e}; } })());
+  const prep = j => j.p || (j.p = (async () => { const b = await storeForm(j.f); try { return {blobs:b, r:await askClaude(b, scanPrompt())}; } catch (e) { return {blobs:b, err:e}; } })());
   S.scanQ = {jobs:files.map(f => ({f, p:null})), i:0, n:files.length, done:0, prep};
   nextScan();
 }
@@ -304,7 +330,7 @@ async function onReceiptFiles(files, pre){
   if (pre) { blobs = pre.blobs; preErr = pre.err || null; }
   else {
     openSheet(scanTitle(), '<div class="status"><span class="spinner" aria-hidden="true"></span><div><strong>Bilder werden vorbereitet …</strong></div></div>');
-    for (const f of files) blobs.push(f.type === 'application/pdf' ? f : await toJpeg(f));
+    for (const f of files) blobs.push(...await storeForm(f));
   }
   const urls = blobs.map(b => URL.createObjectURL(b));
   const thumbs = '<div class="thumbs">' + urls.map((u, i) => blobs[i].type === 'application/pdf' ? '<span class="pdftile">PDF</span>' : '<img alt="Beleg" src="' + u + '">').join('') + '</div>';

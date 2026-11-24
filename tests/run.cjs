@@ -285,7 +285,7 @@ async function addEntry({amount, merchant, cat, card}){
     const d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.entries[0].items.length === 2 && d.entries[0].items[1].k === 'discount' && d.entries[0].savings === 60 && d.entries[0].tax === 'wk' && /^20\d\d-\d\d-\d\d$/.test(d.entries[0].warrantyUntil || '') && d.blobs === 1, JSON.stringify({n:d.entries.length, b:d.blobs}));
   });
   await test('Backup mit Belegfotos → auf leerem Gerät vollständig wiederherstellen', async () => {
-    await loadPlan(); await page.click('[data-act="settings"]'); await page.waitForTimeout(400); await page.uncheck('#s-enc');
+    await loadPlan(); await page.click('[data-act="settings"]'); await page.waitForTimeout(400); await page.uncheck('#s-enc'); await page.check('#s-photos');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="backup"]')]);
     const file = path.join(require('os').tmpdir(), 'kb-test-backup.json'); await dl.saveAs(file);
     const j = JSON.parse(fs.readFileSync(file, 'utf8')); ok(j.version === 2 && Object.keys(j.blobs || {}).length === 1, 'Fotos fehlen im Backup');
@@ -469,7 +469,7 @@ async function addEntry({amount, merchant, cat, card}){
     ok(/consecutive slices of ONE long receipt/.test(c[0] && c[0].text || ''), 'Hinweis auf die Abschnitte fehlt');
     ok(lastAsk.max_tokens >= 32000, 'zu wenig Platz für lange Belege: ' + lastAsk.max_tokens);
     await page.click('#f-save'); await page.waitForTimeout(500);
-    const d = await page.evaluate(DUMP); ok((d.entries[0].receipts || [])[0] && d.entries[0].receipts[0].pdf === true, 'Original-PDF nicht als Beleg gespeichert');
+    const d = await page.evaluate(DUMP); ok((d.entries[0].receipts || []).length === 1 && d.entries[0].receipts[0].pdf === false, 'Bild-PDF nicht als JPEG gespeichert');
   });
   await test('Großer Einkauf: alle 130 Positionen bleiben, 4,9 % USt gilt als normaler Satz', async () => {
     await fresh(); await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
@@ -656,6 +656,47 @@ async function addEntry({amount, merchant, cat, card}){
     await page.waitForTimeout(500);
     const d = Object.fromEntries((await page.evaluate(DUMP)).entries.map(e => [e.id, e.merchant]));
     ok(d.o1 === 'Dauerauftrag Hausrate Musterort' && d.o2 === 'Hofer', JSON.stringify(d));
+  });
+  await test('Speicher: Fotos kleiner, Backup ohne Fotos, Belegarchiv je Quartal sichern und zurückholen, Verkleinern', async () => {
+    await fresh();
+    const z = await page.evaluate(async () => {
+      const cv = document.createElement('canvas'); cv.width = 2400; cv.height = 1800; const cx = cv.getContext('2d'), id = cx.createImageData(2400, 1800);
+      for (let i = 0; i < id.data.length; i += 4) { const v = (i * 2654435761 >>> 24) & 255; id.data[i] = v; id.data[i + 1] = 255 - v; id.data[i + 2] = v ^ 85; id.data[i + 3] = 255; }
+      cx.putImageData(id, 0, 0); const png = await new Promise(r => cv.toBlob(r, 'image/png'));
+      const j = await toJpeg(png), bm = await createImageBitmap(j);
+      await tx('blobs', 'readwrite', st => { st.put(png, 'bx-big'); st.put(new Blob([new Uint8Array(500)], {type:'image/jpeg'}), 'bx-small'); });
+      await saveEntry({id:'z1', type:'expense', amount:1000, catId:'lebensmittel', date:today(), merchant:'Markt', receipts:[{blobId:'bx-big', pdf:false}, {blobId:'bx-small', pdf:false}]});
+      return {w:bm.width, h:bm.height, type:j.type, png:png.size, jpg:j.size};
+    });
+    ok(z.w === 1600 && z.h === 1200 && z.type === 'image/jpeg' && z.jpg < z.png, 'Foto: ' + JSON.stringify(z));
+    await page.click('[data-act="settings"]'); await page.waitForTimeout(400); await page.uncheck('#s-enc');
+    ok(!(await page.isChecked('#s-photos')), 'Fotos sind im Backup noch voreingestellt');
+    const [b1] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="backup"]')]);
+    const fb = path.join(require('os').tmpdir(), 'kb-nophotos.json'); await b1.saveAs(fb);
+    ok(!JSON.parse(fs.readFileSync(fb, 'utf8')).blobs, 'Backup enthält Fotos');
+    await page.click('[data-act="archive"]'); for (let i = 0; i < 20 && !(await page.$('[data-arch]')); i++) await page.waitForTimeout(150);
+    const q = await page.getAttribute('[data-arch]', 'data-arch'), t0 = (await page.innerText('#sheetBody')).replace(/\s+/g, ' ');
+    ok(/^\d{4}-Q[1-4]$/.test(q) && /2 Fotos/.test(t0) && /noch nicht gesichert/.test(t0), 'Archiv-Liste: ' + t0.slice(0, 200));
+    const [a1] = await Promise.all([page.waitForEvent('download'), page.click('[data-arch]')]);
+    const fa = path.join(require('os').tmpdir(), 'kb-archive.json'); await a1.saveAs(fa);
+    const aj = JSON.parse(fs.readFileSync(fa, 'utf8'));
+    ok(aj.kind === 'archive' && aj.period === q && Object.keys(aj.blobs).sort().join() === 'bx-big,bx-small', 'Archiv-Datei: ' + Object.keys(aj.blobs || {}));
+    for (let i = 0; i < 20 && !/vollständig/.test(await page.innerText('#sheetBody')); i++) await page.waitForTimeout(150);
+    ok(/vollständig/.test(await page.innerText('#sheetBody')), 'Archiv nicht als gesichert vermerkt');
+    /* Verkleinern: nur das große Foto wird ersetzt, der Eintrag bleibt gleich */
+    await page.click('#ar-shrink'); await page.click('#ar-shrink');
+    for (let i = 0; i < 40 && !/gespart|Nichts/.test(await page.innerText('#ar-st')); i++) await page.waitForTimeout(200);
+    ok(/1 Beleg verkleinert/.test(await page.innerText('#ar-st')), 'Verkleinern: ' + await page.innerText('#ar-st'));
+    const s = await page.evaluate(async () => { const b = await tx('blobs', 'readonly', st => st.get('bx-big')); return {type:b.type, size:b.size, rec:S.entries.get('z1').receipts.map(r => r.blobId).join()}; });
+    ok(s.type === 'image/jpeg' && s.size < z.png && s.rec === 'bx-big,bx-small', 'nach Verkleinern: ' + JSON.stringify(s));
+    /* leeres Gerät: erst Backup (ohne Fotos), dann Archiv – Fotos sind wieder da */
+    await fresh(); await page.setInputFiles('#jsonInput', fb); await page.waitForTimeout(300); await page.click('#r-go'); await page.waitForTimeout(500);
+    let d = await page.evaluate(DUMP); ok(d.entries.length === 1 && d.blobs === 0, 'nach Backup: ' + d.blobs);
+    await page.evaluate(() => { document.querySelector('#jsonInput').value = ''; });
+    await page.setInputFiles('#jsonInput', fa); await page.waitForTimeout(300);
+    const t1 = await page.innerText('#sheetBody'); ok(/2 Belegfotos/.test(t1) && /davon 2 zu Einträgen/.test(t1), 'Archiv-Dialog: ' + t1);
+    await page.click('#al-go'); await page.waitForTimeout(500);
+    d = await page.evaluate(DUMP); ok(d.blobs === 2, 'nach Archiv: ' + d.blobs);
   });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));

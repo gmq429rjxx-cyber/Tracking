@@ -39,9 +39,10 @@ function openSettings(){
     '<section class="panel"><h3>Apple Pay</h3><p class="note" style="margin:0">Zahlungen mit Apple Pay landen per Kurzbefehl in einer Datei in iCloud Drive. Hier importierst du sie gesammelt.</p><div class="btnrow"><button class="btn small primary" data-act="inbox-pick">Inbox importieren</button><button class="btn small" data-act="inbox-guide">Einrichtung</button></div></section>' +
     '<section class="panel"><h3>Personen</h3><p class="note" style="margin:0">Für wen eine Buchung ist – mehrere möglich, der Betrag wird aufgeteilt. Die erste Person ist vorausgewählt. Namen bleiben nur auf diesem Gerät.</p><div class="list" id="s-pers">' + persons().map((p, i) => '<div class="irow two"><div class="row-main"><span class="row-title"><i class="dot" style="--c:var(--c' + (p.color % 20) + ');display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--c);margin-right:8px"></i>' + esc(p.name) + (i === 0 ? ' <span class="muted">· Standard</span>' : '') + '</span></div><span style="display:flex;gap:10px">' + (i ? '<button class="linkbtn" data-pup="' + esc(p.id) + '" aria-label="Nach oben">↑</button>' : '') + '<button class="linkbtn" style="color:var(--bad)" data-pdel="' + esc(p.id) + '">Entfernen</button></span></div>').join('') + '</div><form id="s-pers-add" class="btnrow" novalidate><input class="input" id="s-pers-name" placeholder="Name, z. B. Familie" maxlength="24" autocomplete="off" style="flex:1"><button class="btn small" type="submit">Hinzufügen</button></form></section>' +
     '<section class="panel"><h3>Daten</h3><p class="note" style="margin:0">Alles liegt nur auf diesem iPhone, ohne Konto und ohne Server. ' + (SET.lastBackup ? 'Letztes Backup: ' + esc(DAYL.format(parseISO(SET.lastBackup.slice(0, 10)))) + '.' : 'Noch kein Backup.') + '</p>' +
-    '<label class="note" style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" switch id="s-photos"' + (SET.backupPhotos === false ? '' : ' checked') + '> Belegfotos mitsichern <span id="s-photos-size"></span></label>' +
+    '<label class="note" style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" switch id="s-photos"' + (SET.backupPhotos === true ? ' checked' : '') + '> Belegfotos ins Backup <span id="s-photos-size"></span></label>' +
     '<label class="note" style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" switch id="s-enc"' + (SET.backupEncrypt === false ? '' : ' checked') + '> Backup mit Passwort verschlüsseln</label>' +
-    '<div class="btnrow"><button class="btn small primary" data-act="backup">Backup sichern</button><button class="btn small" id="s-restore">Backup oder Plan laden</button></div>' +
+    '<div class="btnrow"><button class="btn small primary" data-act="backup">Backup sichern</button><button class="btn small" data-act="archive">Belegarchiv</button><button class="btn small" id="s-restore">Backup oder Plan laden</button></div>' +
+    '<p class="note" style="margin:0">Das Backup sichert deine Daten klein und schnell. Belegfotos sicherst du getrennt im Belegarchiv, einmal im Quartal.</p>' +
     '<div class="btnrow"><button class="btn small" id="s-import">CSV importieren</button><button class="btn small" id="s-csv">Export CSV</button><button class="btn small" data-act="report">Bericht PDF</button><button class="btn small" id="s-clean">Aufräumen</button></div><div id="s-snap"></div></section>' +
     '<section class="panel"><h3>Ausgaben-Kategorien</h3>' + catRows('expense') + '<h3 style="margin-top:6px">Einnahmen-Kategorien</h3>' + catRows('income') +
     '<form id="s-newcat" class="catedit" novalidate><label class="visually-hidden" for="s-newcat-name">Neue Kategorie</label><input class="input" id="s-newcat-name" placeholder="Neue Kategorie"><select class="input" id="s-newcat-kind" style="width:auto" aria-label="Art"><option value="expense">Ausgabe</option><option value="income">Einnahme</option></select><button class="btn small" type="submit">Hinzufügen</button></form>' +
@@ -262,6 +263,7 @@ async function onJsonFile(file){
 }
 function loadJson(d, fileName){
   const file = {name:fileName};
+  if (d && d.app === 'Kassabuch' && d.kind === 'archive' && d.blobs && typeof d.blobs === 'object') { openArchiveLoad(d, fileName); return; }
   if (d && d.app === 'Kassabuch' && d.kind === 'encrypted' && d.kdf && d.iv && d.data) { openBackupUnlock(d, fileName); return; }
   if (d && d.app === 'Kassabuch' && d.kind === 'plan' && Array.isArray(d.categories)) { openPlan(d, file.name); return; }
   if (!d || d.app !== 'Kassabuch' || !Array.isArray(d.entries) || !d.profile || typeof d.profile !== 'object') { toast('Datei ist kein Kassabuch-Backup.'); return; }
@@ -287,6 +289,82 @@ function loadJson(d, fileName){
       closeSheet(); toast(fresh.length + ' Einträge' + (blobs ? ' und Belegfotos' : '') + ' übernommen');
     };
   });
+}
+/* ---------- Belegarchiv: Belegfotos getrennt vom Backup sichern, je Quartal eine Datei ---------- */
+const quarterOf = iso => iso.slice(0, 4) + '-Q' + (Math.floor((Number(iso.slice(5, 7)) - 1) / 3) + 1);
+async function archivePeriods(){
+  const per = {};
+  for (const e of allEntries()) for (const r of e.receipts || []) {
+    if (!r.blobId) continue;
+    const b = await tx('blobs', 'readonly', st => st.get(r.blobId)); if (!b) continue;
+    const k = quarterOf(e.date || today()), p = per[k] = per[k] || {key:k, ids:[], bytes:0, refs:{}};
+    if (!p.refs[r.blobId]) { p.ids.push(r.blobId); p.bytes += b.size || 0; p.refs[r.blobId] = e.id; }
+  }
+  return Object.values(per).sort((a, b) => b.key.localeCompare(a.key));
+}
+const mbText = bytes => { const mb = bytes / 1048576; return (mb < 0.1 ? '< 0,1' : mb.toFixed(1).replace('.', ',')) + ' MB'; };
+async function openArchive(){
+  openSheet('Belegarchiv', '<div class="status"><span class="spinner" aria-hidden="true"></span><div><strong>Belege werden gezählt …</strong></div></div>');
+  const per = await archivePeriods(), done = SET.archives || {};
+  const rows = per.map(p => {
+    const d = done[p.key], fresh = d ? p.ids.filter(id => !(d.ids || []).includes(id)).length : p.ids.length;
+    return '<div class="irow two"><div class="row-main"><span class="row-title">' + esc(p.key.replace('-', ' · ')) + '</span><span class="row-sub">' + p.ids.length + (p.ids.length === 1 ? ' Foto' : ' Fotos') + ', ' + mbText(p.bytes) + ' · ' +
+      (d ? 'gesichert am ' + esc(DAYL.format(parseISO(d.at.slice(0, 10)))) + (fresh ? ', <b class="warntxt">' + fresh + ' neu seither</b>' : ', vollständig') : '<b class="warntxt">noch nicht gesichert</b>') + '</span></div>' +
+      '<button class="btn small' + (fresh ? ' primary' : '') + '" data-arch="' + esc(p.key) + '">Sichern</button></div>';
+  }).join('');
+  const total = per.reduce((a, p) => a + p.bytes, 0);
+  openSheet('Belegarchiv', '<p class="note" style="margin:0">Je Quartal eine Datei mit allen Belegfotos. In „Dateien“ oder iCloud Drive ablegen. Zum Zurückholen über „Backup oder Plan laden“ öffnen.' + (SET.backupEncrypt === false ? '' : ' Verschlüsselt mit Passwort wie das Backup.') + '</p>' +
+    (rows ? '<div class="list">' + rows + '</div>' : '<div class="list"><div class="empty">Noch keine Belegfotos.</div></div>') +
+    (per.length ? '<section class="panel"><h3>Speicher</h3><p class="note" style="margin:0">Belegfotos auf diesem iPhone: ' + mbText(total) + '. Neue Belege werden kleiner gespeichert. Ältere lassen sich nachträglich verkleinern, gut lesbar bleiben sie.</p><div class="btnrow"><button class="btn small" id="ar-shrink">Vorhandene Belege verkleinern</button></div><p class="note" id="ar-st" style="margin:0" hidden></p></section>' : ''),
+    root => {
+      root.querySelectorAll('[data-arch]').forEach(b => { b.onclick = () => exportArchive(per.find(p => p.key === b.dataset.arch)); });
+      const sh = $('#ar-shrink', root); if (sh) sh.onclick = async () => {
+        if (!sh.dataset.sure) { sh.dataset.sure = 1; sh.textContent = 'Sicher? Originale werden ersetzt'; return; }
+        sh.disabled = true; const st = $('#ar-st', root); st.hidden = false; st.textContent = 'Wird verkleinert …';
+        const r = await shrinkStoredReceipts(n => { st.textContent = 'Wird verkleinert … ' + n; });
+        st.textContent = r.n ? r.n + (r.n === 1 ? ' Beleg' : ' Belege') + ' verkleinert, ' + mbText(r.saved) + ' gespart.' : 'Nichts mehr zu verkleinern.';
+      };
+    });
+}
+async function exportArchive(p){
+  if (!p) return;
+  const out = {app:'Kassabuch', kind:'archive', version:1, period:p.key, exportedAt:new Date().toISOString(), refs:p.refs, blobs:{}};
+  for (const id of p.ids) { const b = await tx('blobs', 'readonly', st => st.get(id)); if (b) out.blobs[id] = await blobToData(b); }
+  const json = JSON.stringify(out), name = 'kassabuch-belege-' + p.key;
+  const done = async ok => { if (!ok) return; SET.archives = Object.assign({}, SET.archives || {}, {[p.key]:{at:new Date().toISOString(), ids:p.ids}}); await saveSettings(); toast('Belegarchiv ' + p.key.replace('-', ' ') + ' erstellt. In „Dateien“ oder iCloud Drive sichern.'); openArchive(); };
+  if (SET.backupEncrypt !== false) openBackupLock(json, name + '-verschluesselt.json', done);
+  else done(await deliverFile(name + '.json', json, 'application/json'));
+}
+function openArchiveLoad(d, fileName){
+  const ids = Object.keys(d.blobs).filter(id => /^[\w-]{1,80}$/.test(id)), known = new Set(allEntries().flatMap(e => (e.receipts || []).map(r => r.blobId)));
+  const match = ids.filter(id => known.has(id)).length;
+  openSheet('Belegarchiv laden', '<p class="note" style="margin:0">' + esc(fileName) + '<br>' + ids.length + ' Belegfotos' + (d.period ? ' aus ' + esc(String(d.period).replace('-', ' ')) : '') + ', davon ' + match + ' zu Einträgen auf diesem iPhone.' + (match < ids.length ? ' Die übrigen werden auch abgelegt und erscheinen, sobald das passende Backup geladen ist.' : '') + '</p><button class="btn primary" id="al-go">Belegfotos übernehmen</button>',
+    root => { $('#al-go', root).onclick = async () => {
+      let n = 0;
+      await tx('blobs', 'readwrite', st => { for (const id of ids) { const b = dataToBlob(d.blobs[id]); if (b) { st.put(b, id); n++; } } });
+      closeSheet(); render(); toast(n + ' Belegfotos übernommen');
+    }; });
+}
+/* Vorhandene Belege nachträglich verkleinern: Fotos neu komprimieren, Bild-PDFs zu JPEG; nur ersetzen, wenn es spürbar kleiner wird */
+async function shrinkStoredReceipts(progress){
+  let n = 0, saved = 0, i = 0;
+  for (const e of allEntries()) {
+    if (!(e.receipts || []).length) continue;
+    let changed = false; const rec = [];
+    for (const r of e.receipts) {
+      const b = r.blobId ? await tx('blobs', 'readonly', st => st.get(r.blobId)) : null;
+      if (!b || (b.type !== 'application/pdf' && b.size < 350e3)) { rec.push(r); continue; }
+      if (progress) progress(++i);
+      const nb = await storeForm(b);
+      const size = nb.reduce((a, x) => a + x.size, 0);
+      if ((nb.length === 1 && nb[0] === b) || size >= b.size * 0.9) { rec.push(r); continue; }
+      const parts = nb.map((x, k) => ({blobId:k === 0 ? r.blobId : 'b-' + newId() + Math.random().toString(36).slice(2, 5), pdf:x.type === 'application/pdf'}));
+      await tx('blobs', 'readwrite', st => { parts.forEach((p, k) => st.put(nb[k], p.blobId)); });
+      rec.push(...parts); saved += b.size - size; n++; changed = true;
+    }
+    if (changed) await putEntries([Object.assign(clean(e), {receipts:rec})]);
+  }
+  return {n, saved};
 }
 /* ---------- Aufräumen nach Import: Konten/Kategorien zusammenführen, Duplikate, Umbuchungen, Import rückgängig ---------- */
 const CAT_HINTS = [[/drogerie|haushalt|friseur|putz/i, 'haushalt'], [/miete|^haus\b|wohn|strom|heiz|energie|betriebskost/i, 'wohnen'], [/lebensmittel|supermarkt|einkauf|nahrung/i, 'lebensmittel'], [/tank|treibstoff|benzin|diesel|sprit/i, 'mobilitaet'], [/auto|kfz|motorrad|werkstatt|vignette|park/i, 'auto'],  [/versicher/i, 'versicherung'], [/schule/i, 'schule'], [/kind/i, 'kinder'], [/abo|handy|internet|streaming|mitglied|gym|fitness|vertr/i, 'abos'],  [/gesund|apothek|arzt|medizin/i, 'gesundheit'], [/restaurant|essen gehen|gastro|caf[eé]|freizeit|ausgehen|kino|hobby|sport/i, 'freizeit'], [/kleid|mode|schuh|bekleid|shopping/i, 'shopping'], [/geschenk/i, 'geschenke'], [/urlaub|reise/i, 'reisen'], [/spar|invest|depot|aktie|etf|bitcoin|krypto|crypto/i, 'investment'], [/r[uü]cklage|notgroschen|tagesgeld/i, 'ruecklage'], [/beihilfe/i, 'beihilfe'], [/gehalt|lohn/i, 'gehalt'], [/sonder/i, 'sonderzahlung']];

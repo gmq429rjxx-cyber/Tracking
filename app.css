@@ -338,6 +338,7 @@ input[type=checkbox][switch]{accent-color:var(--ok);width:auto;height:auto}
 .ring-pace{stroke:var(--fg);stroke-width:2;stroke-linecap:round;opacity:.6}
 .ring-txt{font-family:var(--f-display);font-size:14px;font-weight:700;fill:var(--fg);font-variant-numeric:tabular-nums}
 .savtxt{color:var(--sav)}
+.warntxt{color:var(--warn)}
 .chip.sav{background:var(--sav-soft);color:var(--sav)}
 .actions{display:flex;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
 .actions .btn,.actions .btn.primary{flex:1;min-height:44px;border:0;border-radius:0;background:none;color:var(--fg);font-size:14px}
