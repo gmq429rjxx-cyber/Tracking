@@ -1,6 +1,6 @@
 // Kassabuch – Hilfsfunktionen, Datenmodell, Speicher (IndexedDB), Beispieldaten
 'use strict';
-const APP_VERSION = '2026.11.18-3';
+const APP_VERSION = '2026.11.24-1';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -119,7 +119,7 @@ function normalizeProfile(p){
 
 const S = {
   mode:'loading', uid:null, profile:defaultProfile(), entries:new Map(), month:mkey(today()), tab:'uebersicht',
-  q:'', fCard:'', fCat:'', fPers:'', fType:'', statsMode:'month', statsYear:new Date().getFullYear(),
+  q:'', fCard:'', fCat:'', fPers:'', fType:'', statsMode:'month', flowMode:'group', statsYear:new Date().getFullYear(),
   canScan:false, imgTypes:['image/jpeg','image/png','image/webp','image/gif'], maxImgs:4, banner:'', ready:false, persisted:false
 };
 let idb = null;

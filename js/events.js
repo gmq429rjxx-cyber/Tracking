@@ -73,6 +73,7 @@ const ACTIONS = {
   'repeat': t => { closeSheet(); const e = S.entries.get(t.dataset.id); if (e) setTimeout(() => openEntry(null, {type:e.type, merchant:e.merchant, catId:e.catId, cardId:e.cardId, toCardId:e.toCardId, amount:e.amount, persons:e.persons}), 260); },
   'month': t => { S.month = addMonths(S.month, Number(t.dataset.d)); render(); },
   'stats-nav': t => { if (S.statsMode === 'year') S.statsYear += Number(t.dataset.d); else S.month = addMonths(S.month, Number(t.dataset.d)); render(); },
+  'flow-mode': t => { S.flowMode = t.dataset.mode; render(); },
   'stats-mode': t => { S.statsMode = t.dataset.mode; if (S.statsMode === 'year') S.statsYear = Number(S.month.slice(0, 4)); render(); },
   'add': t => openEntry(null),
   'scan': t => startScanPick(),

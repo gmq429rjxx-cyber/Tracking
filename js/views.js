@@ -509,6 +509,55 @@ function openItemHistory(key){
     '<p class="note" style="margin:0">Günstigster Stückpreis ' + money(min) + ', teuerster ' + money(max) + '. Warengruppe: ' + esc(last.g) + '.</p>' + priceSpark(hist) + priceByMerchant(hist) +
     '<div class="list">' + hist.slice().reverse().map(h => '<div class="row"><span class="row-main"><span class="row-title">' + esc(h.merchant || 'Unbekannt') + '</span><span class="row-sub">' + esc(DAYL.format(parseISO(h.date))) + (h.q !== 1 ? ' · ' + esc(String(h.q).replace('.', ',')) + ' Stk.' : '') + '</span></span><span class="row-end"><span class="row-amt">' + money(h.unit) + '</span><span class="row-date">pro Stück</span></span></div>').join('') + '</div>');
 }
+/* ---------- Geldfluss (Sankey): woher das Geld kam und wohin es ging ----------
+   Links Einnahmen je Kategorie (und Entnahmen aus dem Ersparten), Mitte der Gesamtfluss, rechts Gruppen oder Kategorien plus Überschuss.
+   Erstattungen mindern ihre Ausgaben-Kategorie, Umbuchungen zählen nicht. */
+function flowData(list){
+  const inc = {}, out = {}; let back = 0;
+  for (const e of list) {
+    if (e.type === 'expense') for (const [c, v] of catShares(e)) out[c] = (out[c] || 0) + v;
+    else if (isWithdrawal(e)) back += e.amount || 0;
+    else if (isRefund(e)) out[e.catId] = (out[e.catId] || 0) - (e.amount || 0);
+    else if (e.type === 'income') inc[e.catId] = (inc[e.catId] || 0) + (e.amount || 0);
+  }
+  const left = Object.entries(inc).filter(p => p[1] > 0).sort((a, b) => b[1] - a[1]).map(([id, v]) => { const c = catById(id); return {name:c.name, v, col:'var(--c' + (c.color % 20) + ')'}; });
+  if (back > 0) left.push({name:'Aus Erspartem', v:back, col:'var(--sav)'});
+  const cats_ = Object.entries(out).filter(p => p[1] > 0).map(([id, v]) => ({id, c:catById(id), v}));
+  return {left, cats:cats_};
+}
+function flowSection(list){
+  const {left, cats:cl} = flowData(list), byGroup = S.flowMode !== 'cat';
+  const inSum = left.reduce((a, n) => a + n.v, 0), outSum = cl.reduce((a, n) => a + n.v, 0);
+  if (!inSum && !outSum) return '';
+  let right;
+  if (byGroup) {
+    const exp = cats().filter(c => c.kind === 'expense'), order = (S.profile.groups || []).concat([...new Set(exp.map(c => c.group || 'Sonstige'))]).filter((g, i, a) => a.indexOf(g) === i);
+    const g = {}; for (const x of cl) { const k = x.c.group || 'Sonstige'; (g[k] = g[k] || {name:k, v:0, top:x, n:0}); g[k].v += x.v; g[k].n++; if (x.v > g[k].top.v) g[k].top = x; }
+    right = Object.values(g).sort((a, b) => b.v - a.v || order.indexOf(a.name) - order.indexOf(b.name)).map(o => ({name:o.name, v:o.v, col:o.top.c.saving ? 'var(--sav)' : 'var(--c' + (o.top.c.color % 20) + ')', sub:o.n > 1 ? o.n + ' Kategorien' : o.top.c.name}));
+  } else right = cl.sort((a, b) => b.v - a.v).map(x => ({name:x.c.name, v:x.v, col:x.c.saving ? 'var(--sav)' : 'var(--c' + (x.c.color % 20) + ')'}));
+  const diff = inSum - outSum;
+  if (diff > 0) right.push({name:'Überschuss', v:diff, col:'var(--ok)', sum:true});
+  else if (diff < 0) left.push({name:'Vom Konto', v:-diff, col:'var(--bad)', sum:true});
+  const total = Math.max(inSum, outSum);
+  /* Geometrie: Knotenhöhe proportional zum Betrag, aber jeder Knoten bekommt mindestens Platz für seine zwei Textzeilen */
+  const W = 360, NW = 8, MX = (W - NW) / 2, MIDH = 230, GAP = 6, SLOT = 30, sc = MIDH / total;
+  const place = nodes => { let y = 0; for (const n of nodes) { n.h = Math.max(1.5, n.v * sc); n.slot = Math.max(n.h, SLOT); n.y = y + (n.slot - n.h) / 2; y += n.slot + GAP; } return y - GAP; };
+  const hl = place(left), hr = place(right), H = Math.max(hl, hr, MIDH) + 8;
+  const offL = (H - hl) / 2, offR = (H - hr) / 2, my = (H - total * sc) / 2;
+  for (const n of left) n.y += offL; for (const n of right) n.y += offR;
+  const band = (x1, y1, x2, y2, h, col) => { const cx = (x1 + x2) / 2; return '<path d="M' + x1 + ' ' + y1.toFixed(1) + 'C' + cx + ' ' + y1.toFixed(1) + ' ' + cx + ' ' + y2.toFixed(1) + ' ' + x2 + ' ' + y2.toFixed(1) + 'L' + x2 + ' ' + (y2 + h).toFixed(1) + 'C' + cx + ' ' + (y2 + h).toFixed(1) + ' ' + cx + ' ' + (y1 + h).toFixed(1) + ' ' + x1 + ' ' + (y1 + h).toFixed(1) + 'Z" fill="' + col + '" opacity=".22"/>'; };
+  const pct = v => total ? Math.round(v / total * 100) : 0;
+  const label = (n, x, anchor) => { const cy = n.y + n.h / 2; return '<text x="' + x + '" y="' + (cy - 3).toFixed(1) + '" text-anchor="' + anchor + '" font-size="11.5" font-weight="600" fill="var(--fg)">' + esc(n.name) + '</text><text x="' + x + '" y="' + (cy + 10).toFixed(1) + '" text-anchor="' + anchor + '" font-size="10.5" fill="var(--muted)" style="font-variant-numeric:tabular-nums">' + esc(money0(n.v)) + ' · ' + pct(n.v) + ' %</text>'; };
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H.toFixed(0) + '" role="img" aria-label="Geldfluss: Einnahmen ' + esc(money0(inSum)) + ', Ausgaben und Sparen ' + esc(money0(outSum)) + '">';
+  let o = my; for (const n of left) { svg += band(NW, n.y, MX, o, n.h, n.col); o += n.h; }
+  o = my; for (const n of right) { svg += band(MX + NW, o, W - NW, n.y, n.h, n.col); o += n.h; }
+  svg += '<rect x="' + MX + '" y="' + my.toFixed(1) + '" width="' + NW + '" height="' + (total * sc).toFixed(1) + '" rx="2" fill="var(--fg)" opacity=".85"/>';
+  for (const n of left) svg += '<rect x="0" y="' + n.y.toFixed(1) + '" width="' + NW + '" height="' + n.h.toFixed(1) + '" rx="2" fill="' + n.col + '"><title>' + esc(n.name + ' ' + money(n.v)) + '</title></rect>' + label(n, NW + 6, 'start');
+  for (const n of right) svg += '<rect x="' + (W - NW) + '" y="' + n.y.toFixed(1) + '" width="' + NW + '" height="' + n.h.toFixed(1) + '" rx="2" fill="' + n.col + '"><title>' + esc(n.name + ' ' + money(n.v)) + '</title></rect>' + label(n, W - NW - 6, 'end');
+  svg += '</svg>';
+  return '<section class="block"><div class="block-head"><h2>Geldfluss</h2><div class="seg seg-sm" role="group" aria-label="Aufschlüsselung"><button data-act="flow-mode" data-mode="group" aria-pressed="' + byGroup + '">Gruppen</button><button data-act="flow-mode" data-mode="cat" aria-pressed="' + !byGroup + '">Kategorien</button></div></div>' +
+    '<div class="chartbox flow">' + svg + '</div><p class="note" style="margin:6px 0 0">Eingenommen ' + money0(inSum) + ' · ausgegeben und gespart ' + money0(outSum) + '. Erstattungen sind abgezogen, Umbuchungen zählen nicht.</p></section>';
+}
 function viewStats(){
   const year = S.statsMode === 'year';
   const label = year ? String(S.statsYear) : monthLabel(S.month);
@@ -532,6 +581,7 @@ function viewStats(){
   h += '<section class="hero flat"><div><div class="eyebrow">Ausgaben</div><div class="big">' + money(s.exp) + '</div>' + (cmp ? '<div class="note">' + cmp + '</div>' : '') + '</div>' +
     '<div class="kv"><div><span>Einnahmen</span><strong class="pos">' + money(s.inc) + '</strong></div><div><span>Gespart</span><strong class="' + (s.sav ? 'savtxt' : '') + '">' + money(s.sav) + '</strong></div><div><span>Saldo</span><strong class="' + (s.bal < 0 ? 'badtxt' : '') + '">' + money(s.bal) + '</strong></div></div>' +
     '<p class="note hero-foot">Ø ' + money(Math.round(s.exp / Math.max(1, days))) + ' pro Tag' + (s.inc ? ' · Sparquote ' + Math.round((s.inc - s.exp) / s.inc * 100) + ' %' : '') + (biggest ? ' · größte Ausgabe ' + esc(biggest.merchant || catById(biggest.catId).name) + ' ' + money(biggest.amount) : '') + '</p></section>';
+  h += flowSection(list);
   if (!year) h += curveSection();
   // trend chart
   const keys = [];

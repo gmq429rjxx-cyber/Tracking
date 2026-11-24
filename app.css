@@ -261,6 +261,8 @@ details.more[open]>summary::before{content:'− '}
 .hbar .track i{display:block;height:100%;border-radius:99px;background:var(--c)}
 .chartbox{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px}
 .chartbox svg{width:100%;height:auto;display:block}
+.seg-sm button{min-height:30px;font-size:12.5px;padding:0 9px}
+.chartbox.flow svg text{paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
 .legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted);margin-top:6px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .swatches{display:flex;flex-wrap:wrap;gap:8px}
