@@ -37,7 +37,8 @@ async function toJpeg(file){
     const cv = document.createElement('canvas'); cv.width = Math.round(w * s); cv.height = Math.round(h * s);
     cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
     const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', IMG_Q));
-    return blob && blob.size < file.size ? blob : file.type === 'image/jpeg' ? file : (blob || file);
+    if (!blob) return file;
+    return s < 1 || blob.size < file.size || file.type !== 'image/jpeg' ? blob : file;   // ein kleines JPEG nicht durch ein größeres ersetzen
   } catch (_) { return file; } finally { URL.revokeObjectURL(url); }
 }
 /* ---------- Lange Belege in lesbare Abschnitte schneiden ----------
