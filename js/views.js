@@ -513,13 +513,14 @@ function openItemHistory(key){
    Links Einnahmen je Kategorie (und Entnahmen aus dem Ersparten), Mitte der Gesamtfluss, rechts Gruppen oder Kategorien plus Überschuss.
    Erstattungen mindern ihre Ausgaben-Kategorie, Umbuchungen zählen nicht. */
 function flowData(list){
+  /* Sparen netto wie in der Übersicht: Entnahmen mindern ihre Spar-Kategorie; nur was darüber hinausgeht, kommt links als „Aus Erspartem“ */
   const inc = {}, out = {}; let back = 0;
   for (const e of list) {
     if (e.type === 'expense') for (const [c, v] of catShares(e)) out[c] = (out[c] || 0) + v;
-    else if (isWithdrawal(e)) back += e.amount || 0;
-    else if (isRefund(e)) out[e.catId] = (out[e.catId] || 0) - (e.amount || 0);
+    else if (isWithdrawal(e) || isRefund(e)) out[e.catId] = (out[e.catId] || 0) - (e.amount || 0);
     else if (e.type === 'income') inc[e.catId] = (inc[e.catId] || 0) + (e.amount || 0);
   }
+  for (const [id, v] of Object.entries(out)) if (v < 0 && isSaving(id)) back -= v;
   const left = Object.entries(inc).filter(p => p[1] > 0).sort((a, b) => b[1] - a[1]).map(([id, v]) => { const c = catById(id); return {name:c.name, v, col:'var(--c' + (c.color % 20) + ')'}; });
   if (back > 0) left.push({name:'Aus Erspartem', v:back, col:'var(--sav)'});
   const cats_ = Object.entries(out).filter(p => p[1] > 0).map(([id, v]) => ({id, c:catById(id), v}));

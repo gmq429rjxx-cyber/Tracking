@@ -601,16 +601,19 @@ async function addEntry({amount, merchant, cat, card}){
   });
   await test('Geldfluss: Einnahmen links, Gruppen/Kategorien und Überschuss rechts, Erstattung abgezogen, Umbuchung ignoriert', async () => {
     await fresh();
-    await seed(`(p, es) => { p.cards.push({id:'k1', name:'Giro'}, {id:'k2', name:'Spar'}); const d = '${today()}';
+    await seed(`(p, es) => { p.cards.push({id:'k1', name:'Giro'}, {id:'k2', name:'Spar'}); const d = '${today()}'; p.categories = p.categories.filter(c => !['ruecklage', 'investment'].includes(c.id)).concat([{id:'ruecklage', name:'Rücklage', kind:'expense', saving:true, group:'Sparen & Investieren', color:17}, {id:'investment', name:'Investment', kind:'expense', saving:true, group:'Sparen & Investieren', color:16}]);
       es.put({id:'a', type:'income', amount:300000, catId:'gehalt', date:d, merchant:'Arbeit'});
       es.put({id:'b', type:'expense', amount:50000, catId:'lebensmittel', date:d, merchant:'Markt', splits:[{catId:'lebensmittel', amount:40000}, {catId:'kinder', amount:10000}]});
       es.put({id:'c', type:'expense', amount:20000, catId:'shopping', date:d, merchant:'Shop'}); es.put({id:'r', type:'income', amount:5000, catId:'shopping', date:d, merchant:'Shop'});
-      es.put({id:'t', type:'transfer', amount:99900, cardId:'k1', toCardId:'k2', date:d}); }`);
+      es.put({id:'t', type:'transfer', amount:99900, cardId:'k1', toCardId:'k2', date:d});
+      es.put({id:'s1', type:'expense', amount:60000, catId:'ruecklage', date:d, merchant:'Sparen'}); es.put({id:'s2', type:'income', amount:10000, catId:'ruecklage', date:d, merchant:'Entnahme'});
+      es.put({id:'s3', type:'income', amount:7000, catId:'investment', date:d, merchant:'Verkauf'}); }`);
     const r = await page.evaluate(() => { const f = flowData(entriesIn(S.month)); return {left:f.left.map(n => n.name + ':' + n.v), cats:f.cats.map(x => x.id + ':' + x.v).sort()}; });
-    ok(r.left.join() === 'Gehalt:300000', 'links: ' + r.left);
-    ok(r.cats.join() === 'kinder:10000,lebensmittel:40000,shopping:15000', 'rechts: ' + r.cats);
+    ok(r.left.join() === 'Gehalt:300000,Aus Erspartem:7000', 'links: ' + r.left);
+    ok(r.cats.join() === 'kinder:10000,lebensmittel:40000,ruecklage:50000,shopping:15000', 'rechts (Sparen netto): ' + r.cats);
+    const s = await page.evaluate(() => sums(entriesIn(S.month))); ok(s.sav === 43000, 'Übersicht gespart: ' + s.sav);
     await go('statistik'); const t = (await page.innerText('#view')).replace(/\s+/g, ' ');
-    ok(/Geldfluss/.test(t) && /Überschuss € ?2\.350/.test(t), 'Abschnitt: ' + (t.match(/Geldfluss.{0,200}/) || [''])[0]);
+    ok(/Geldfluss/.test(t) && /Überschuss € ?1\.920/.test(t), 'Abschnitt: ' + (t.match(/Geldfluss.{0,200}/) || [''])[0]);
     await page.click('[data-act="flow-mode"][data-mode="cat"]'); await page.waitForTimeout(200);
     ok(/Kinder € ?100/.test((await page.innerText('#view')).replace(/\s+/g, ' ')), 'Kategorien-Ansicht fehlt');
   });
