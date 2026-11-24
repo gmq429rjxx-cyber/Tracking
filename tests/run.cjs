@@ -645,6 +645,18 @@ async function addEntry({amount, merchant, cat, card}){
     await page.fill('#chatIn', 'Danke'); await page.click('#chatGo'); await page.waitForTimeout(600);
     ok(askLog.length === 1 && askLog[0].messages.length === 5 && askLog[0].messages.every(x => Object.keys(x).join() === 'role,content'), 'Verlauf: ' + JSON.stringify(askLog[0] && askLog[0].messages.map(x => Object.keys(x))));
   });
+  await test('Bank-Texte: Dauerauftrag ohne Auftraggeber-Name und BIC, alte Einträge einmalig bereinigt', async () => {
+    await fresh();
+    const r = await page.evaluate(async () => { const m = await import('./bank.js');
+      return {a:m.tidyBankName('Max Muster Dauerauftrag vom Hausrate Musterort , RZOOAT2L4'), b:m.tidyBankName('Musterfirma GmbH , BKAUATWW'), c:m.tidyBankName('Trade Republic'), d:m.tidyBankName('Max Muster Dauerauftrag vom'),
+        p:m.parseBank(['Buchung', 'Bank | Raiffeisenbank Musterregion eGen', 'IBAN | AT61 1904 3002 3457 3201', 'Geldausgang', 'Buchungsdatum | Buchungstext | Valutadatum | Betrag', '01.11.2026 | Max Muster | 01.11.2026 | -800,00 EUR', 'Dauerauftrag vom 01.11.2026 Hausrate Musterort', 'AT48 3400 0000 0123 4567', 'RZOOAT2L455'], '2026-11-01_Buchung_55.pdf')}; });
+    ok(r.a === 'Dauerauftrag Hausrate Musterort' && r.b === 'Musterfirma GmbH' && r.c === 'Trade Republic' && r.d === 'Dauerauftrag Max Muster', JSON.stringify(r).slice(0, 300));
+    ok(r.p.ok && r.p.merchant === 'Dauerauftrag Hausrate Musterort' && !/Max Muster/.test(r.p.reference), 'Import: ' + r.p.merchant + ' / ' + r.p.reference);
+    await seed(`(p, es) => { kv.delete('mig-bankname1'); es.put({id:'o1', type:'expense', amount:80000, catId:'wohnen', date:'${today()}', merchant:'Max Muster Dauerauftrag vom Hausrate Musterort , RZOOAT2L4'}); es.put({id:'o2', type:'expense', amount:500, catId:'lebensmittel', date:'${today()}', merchant:'Hofer'}); }`);
+    await page.waitForTimeout(500);
+    const d = Object.fromEntries((await page.evaluate(DUMP)).entries.map(e => [e.id, e.merchant]));
+    ok(d.o1 === 'Dauerauftrag Hausrate Musterort' && d.o2 === 'Hofer', JSON.stringify(d));
+  });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
     await page.click('[data-act="examples-load"]'); for (const r of ['uebersicht', 'statistik', 'karten']) await go(r);

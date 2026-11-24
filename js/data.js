@@ -52,6 +52,19 @@ async function migrateSplits(){
     await kvSet('mig-split1', 1);
   } catch (_) {}
 }
+/* Einmalig: alte Bank-Buchungstexte bereinigen (BIC, Name des Auftraggebers bei Daueraufträgen) */
+async function migrateBankNames(){
+  try {
+    if (await kvGet('mig-bankname1')) return;
+    const hit = allEntries().filter(e => e.merchant && (/Dauerauftrag/i.test(e.merchant) || /\b(?=[A-Z0-9]*\d)[A-Z]{6}[A-Z0-9]{2,5}\b/.test(e.merchant)));
+    if (hit.length) {
+      const m = await import(new URL('bank.js', document.baseURI).href), ch = [];
+      for (const e of hit) { const n = m.tidyBankName(e.merchant); if (n && n !== e.merchant) ch.push(Object.assign(clean(e), {merchant:n})); }
+      if (ch.length) await putEntries(ch);
+    }
+    await kvSet('mig-bankname1', 1);
+  } catch (_) {}
+}
 async function migrateMerchants(){
   try {
     if (await kvGet('mig-merchant1')) return;
@@ -85,7 +98,7 @@ async function init(){
     S.mode = 'local'; S.ready = true;
     await snapshotBeforeUpdate(p, list);
     await bookDue();
-    if ((await kvGet('skipMigrations')) !== APP_VERSION) { await migrateMerchants(); await migrateColors(); await migrateChecks(); await migrateSplits(); }
+    if ((await kvGet('skipMigrations')) !== APP_VERSION) { await migrateMerchants(); await migrateColors(); await migrateChecks(); await migrateSplits(); await migrateBankNames(); }
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(ok => { S.persisted = ok; }).catch(() => {});
   } catch (e) {
     S.mode = 'error'; S.banner = 'Der Gerätespeicher ist nicht verfügbar (privates Surfen?). Die App kann so nichts speichern.';

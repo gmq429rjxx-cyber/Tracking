@@ -75,6 +75,16 @@ export async function pdfImages(buffer){
   return out.length ? out : null;
 }
 
+/** Bank-Buchungstext lesbar und sparsam machen: BIC weg, bei Daueraufträgen nur „Dauerauftrag <Zweck>“ statt Name des Auftraggebers.
+    Wird beim Import und einmalig für alte Einträge verwendet. */
+export function tidyBankName(s){
+  let t = String(s || '').replace(/\b[A-Z]{6}[A-Z0-9]{2,5}\b/g, m => /\d/.test(m) ? ' ' : m)   // BIC (z. B. RZOOAT2L)
+    .replace(/,\s*[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\s*$/, ' ');   // BIC ohne Ziffer am Ende nach Komma
+  const m = t.match(/^(.*?)\bDauerauftrag\b(?:\s+(?:vom|von|an)\b)?(.*)$/i);
+  if (m) { const purpose = m[2].replace(/[\s,;:.-]+$/, '').replace(/^[\s,;:.-]+/, '').trim(); t = 'Dauerauftrag ' + (purpose || m[1].trim()); }
+  return t.replace(/\s+([,;])/g, '$1').replace(/\s+/g, ' ').replace(/[\s,;:-]+$/, '').trim();
+}
+
 export function parseBank(lines, fileName){
   const text = lines.join('\n');
   try {
@@ -140,10 +150,11 @@ function raiffeisen(lines, fileName){
     .replace(/\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{10,}\b/g, ' ')   // Mandats- oder Zahlungsreferenz
     .replace(/Online Banking vom [\d.]+ um/gi, ' ').replace(/\b[DKB]\d\b/g, ' ').replace(/\b(POS|AT|ATM|BANKOMAT|KARTE|K\d)\b/g, ' ').replace(/\b\d[\d./:-]*\b/g, ' ').replace(/\s+/g, ' ').trim()
     .replace(/^(.{3,}?) \1\b/i, '$1');   // „Trade Republic Trade Republic“ → einmal
+  const nice = tidyBankName(cleaned);
   const bm = String(fileName || '').match(/Buchung_(\d+)/);
   return {ok:true, bank:'rb', bankName:'Raiffeisen', id:bm ? bm[1] : hash(date + amt + raw), date, amount:Math.abs(amt), type:income ? 'income' : 'expense',
-    merchant:cleaned ? (cleaned === cleaned.toUpperCase() ? titleCase(cleaned) : cleaned) : raw, merchantRaw:raw, cardLast4:'', cardCode:isTransfer ? '' : code, ibanLast4:ibanLast4(lines), pending:false,
-    time:timePart ? timePart.split(/\s+/)[1] : null, kind:isTransfer ? 'transfer' : 'card', counterpartyIbanLast4:cpIban, reference:isTransfer && cleaned ? cleaned : ''};
+    merchant:nice ? (nice === nice.toUpperCase() ? titleCase(nice) : nice) : raw, merchantRaw:raw, cardLast4:'', cardCode:isTransfer ? '' : code, ibanLast4:ibanLast4(lines), pending:false,
+    time:timePart ? timePart.split(/\s+/)[1] : null, kind:isTransfer ? 'transfer' : 'card', counterpartyIbanLast4:cpIban, reference:isTransfer && nice ? nice : ''};
 }
 
 function trTransfer(lines, text, fileName){
