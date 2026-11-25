@@ -72,7 +72,9 @@ function viewOverview(){
       const sp = spentByCat(list), yearC = [], noneC = [];
       for (const c of cats()) if (c.kind === 'expense' && !c.saving && !S.profile.budgets[c.id] && sp[c.id] > 0) (S.profile.yearBudgets && S.profile.yearBudgets[c.id] ? yearC : noneC).push(c);
       const sum = l => money(l.reduce((a, c) => a + sp[c.id], 0));
-      if (yearC.length) parts.push(esc(yearC.map(c => c.name).join(', ')) + ' ' + sum(yearC) + ' über Jahresbudget');
+      /* Jahresbudget-Kategorien: Betrag dieses Monats plus Rest im Jahr, damit es nicht nach „verbraucht“ klingt */
+      if (yearC.length) { const ysp = spentByCat(entriesIn(k.slice(0, 4)).filter(e => e.type === 'expense'));
+        for (const c of yearC) { const rest = S.profile.yearBudgets[c.id] - (ysp[c.id] || 0); parts.push(esc(c.name) + ' ' + money(sp[c.id]) + ' aus Jahresbudget (' + (rest >= 0 ? 'noch ' + money0(rest) : '<b class="badtxt">' + money0(-rest) + ' drüber</b>') + ')'); } }
       if (noneC.length) parts.push(sum(noneC) + ' ohne Budget' + (noneC.length <= 2 ? ' (' + esc(noneC.map(c => c.name).join(', ')) + ')' : ''));
     }
     if (isCur) parts.push((dim(k) - daysGone) + ' Tage übrig');
