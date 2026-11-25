@@ -43,5 +43,12 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # GitHub findet das eben hochgeladene Paket manchmal erst verzögert: kurz warten, bei Fehler einmal nachversuchen
+      - run: sleep 15
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 90
+      - if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
