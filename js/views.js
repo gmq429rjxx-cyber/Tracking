@@ -63,7 +63,21 @@ function viewOverview(){
   const bsAll = tb ? budgetSpent(list) : 0;
   h += '<section class="hero flat"><div class="hero-top">' + (dayH || '<div><div class="eyebrow">Ausgaben</div><div class="big">' + money(s.exp) + '</div></div>') + (tb ? budgetRing(bsAll, tb, isCur ? pace : null, budgetState(bsAll, tb, pace)) : '') + '</div>';
   h += '<div class="kv">' + (dayH ? '<div><span>Ausgaben</span><strong>' + money(s.exp) + '</strong></div>' : '') + '<div><span>Einnahmen</span><strong class="pos">' + money(s.inc) + '</strong></div>' + (hasSav ? '<div><span>Gespart</span><strong class="' + (s.sav ? 'savtxt' : '') + '">' + money(s.sav) + '</strong></div>' : '') + (!dayH || !hasSav ? '<div><span>Saldo</span><strong class="' + (s.bal < 0 ? 'badtxt' : '') + '">' + money(s.bal) + '</strong></div>' : '') + (!dayH && !hasSav ? '<div><span>Ø pro Tag</span><strong>' + money(Math.round(s.exp / Math.max(1, daysGone))) + '</strong></div>' : '') + '</div>';
-  if (tb) { const left = tb - bsAll; h += '<p class="note hero-foot">Budget ' + money0(tb) + ' · ' + (left >= 0 ? 'noch ' + money(left) : '<b class="badtxt">' + money(-left) + ' drüber</b>') + (isCur ? ' · ' + (dim(k) - daysGone) + ' Tage übrig' : '') + '</p>'; }
+  if (tb) {
+    /* Selbsterklärend: Monatsbudget gegen die Ausgaben in Kategorien MIT Monatsbudget; was außerhalb läuft (Jahresbudget, ohne Budget), steht dahinter */
+    const left = tb - bsAll, parts = [(S.profile.totalBudget ? 'Budget ' : 'Monatsbudget ') + money0(tb)];
+    if (bsAll !== s.exp) parts.push('ausgegeben ' + money(bsAll));
+    parts.push(left >= 0 ? 'noch ' + money(left) : '<b class="badtxt">' + money(-left) + ' drüber</b>');
+    if (!S.profile.totalBudget) {
+      const sp = spentByCat(list), yearC = [], noneC = [];
+      for (const c of cats()) if (c.kind === 'expense' && !c.saving && !S.profile.budgets[c.id] && sp[c.id] > 0) (S.profile.yearBudgets && S.profile.yearBudgets[c.id] ? yearC : noneC).push(c);
+      const sum = l => money(l.reduce((a, c) => a + sp[c.id], 0));
+      if (yearC.length) parts.push(esc(yearC.map(c => c.name).join(', ')) + ' ' + sum(yearC) + ' über Jahresbudget');
+      if (noneC.length) parts.push(sum(noneC) + ' ohne Budget' + (noneC.length <= 2 ? ' (' + esc(noneC.map(c => c.name).join(', ')) + ')' : ''));
+    }
+    if (isCur) parts.push((dim(k) - daysGone) + ' Tage übrig');
+    h += '<p class="note hero-foot">' + parts.join(' · ') + '</p>';
+  }
   h += '</section>';
   if (allEntries().some(e => e.example)) h += '<div class="exbar"><span>Beispieldaten sind aktiv.</span><button class="btn small" data-act="examples-remove">Entfernen</button></div>';
   h += '<div class="actions">' + (S.canScan ? '<button class="btn primary" data-act="scan">' + ICON.camera + 'Beleg</button>' : '<button class="btn" data-act="scan-info">' + ICON.camera + 'Beleg</button>') + '<button class="btn" data-act="bank">' + ICON.bank + 'Bank</button><button class="btn" data-act="inbox">' + ICON.wallet + 'Apple Pay</button></div>';

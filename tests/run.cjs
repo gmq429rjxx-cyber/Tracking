@@ -698,6 +698,14 @@ async function addEntry({amount, merchant, cat, card}){
     await page.click('#al-go'); await page.waitForTimeout(500);
     d = await page.evaluate(DUMP); ok(d.blobs === 2, 'nach Archiv: ' + d.blobs);
   });
+  await test('Übersicht: Budget-Zeile erklärt, was gegen das Monatsbudget zählt und was nicht', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.budgets = {lebensmittel:20000}; p.yearBudgets = {freizeit:100000}; p.totalBudget = null; const d = '${today()}';
+      es.put({id:'h1', type:'expense', amount:25000, catId:'lebensmittel', date:d, merchant:'Markt'}); es.put({id:'h2', type:'expense', amount:4000, catId:'freizeit', date:d, merchant:'Kino'});
+      es.put({id:'h3', type:'expense', amount:1500, catId:'sonstiges', date:d, merchant:'Allerlei'}); }`);
+    await go('uebersicht'); const t = (await page.innerText('.hero-foot')).replace(/\s+/g, ' ');
+    ok(/Monatsbudget € ?200/.test(t) && /ausgegeben € ?250,00/.test(t) && /€ ?50,00 drüber/.test(t) && /Freizeit € ?40,00 über Jahresbudget/.test(t) && /€ ?15,00 ohne Budget/.test(t), t);
+  });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
     await page.click('[data-act="examples-load"]'); for (const r of ['uebersicht', 'statistik', 'karten']) await go(r);
