@@ -64,19 +64,11 @@ function viewOverview(){
   h += '<section class="hero flat"><div class="hero-top">' + (dayH || '<div><div class="eyebrow">Ausgaben</div><div class="big">' + money(s.exp) + '</div></div>') + (tb ? budgetRing(bsAll, tb, isCur ? pace : null, budgetState(bsAll, tb, pace)) : '') + '</div>';
   h += '<div class="kv">' + (dayH ? '<div><span>Ausgaben</span><strong>' + money(s.exp) + '</strong></div>' : '') + '<div><span>Einnahmen</span><strong class="pos">' + money(s.inc) + '</strong></div>' + (hasSav ? '<div><span>Gespart</span><strong class="' + (s.sav ? 'savtxt' : '') + '">' + money(s.sav) + '</strong></div>' : '') + (!dayH || !hasSav ? '<div><span>Saldo</span><strong class="' + (s.bal < 0 ? 'badtxt' : '') + '">' + money(s.bal) + '</strong></div>' : '') + (!dayH && !hasSav ? '<div><span>Ø pro Tag</span><strong>' + money(Math.round(s.exp / Math.max(1, daysGone))) + '</strong></div>' : '') + '</div>';
   if (tb) {
-    /* Selbsterklärend: Monatsbudget gegen die Ausgaben in Kategorien MIT Monatsbudget; was außerhalb läuft (Jahresbudget, ohne Budget), steht dahinter */
-    const left = tb - bsAll, parts = [(S.profile.totalBudget ? 'Budget ' : 'Monatsbudget ') + money0(tb)];
-    if (bsAll !== s.exp) parts.push('ausgegeben ' + money(bsAll));
-    parts.push(left >= 0 ? 'noch ' + money(left) : '<b class="badtxt">' + money(-left) + ' drüber</b>');
-    if (!S.profile.totalBudget) {
-      const sp = spentByCat(list), yearC = [], noneC = [];
-      for (const c of cats()) if (c.kind === 'expense' && !c.saving && !S.profile.budgets[c.id] && sp[c.id] > 0) (S.profile.yearBudgets && S.profile.yearBudgets[c.id] ? yearC : noneC).push(c);
-      const sum = l => money(l.reduce((a, c) => a + sp[c.id], 0));
-      /* Jahresbudget-Kategorien: Betrag dieses Monats plus Rest im Jahr, damit es nicht nach „verbraucht“ klingt */
-      if (yearC.length) { const ysp = spentByCat(entriesIn(k.slice(0, 4)).filter(e => e.type === 'expense'));
-        for (const c of yearC) { const rest = S.profile.yearBudgets[c.id] - (ysp[c.id] || 0); parts.push(esc(c.name) + ' ' + money(sp[c.id]) + ' aus Jahresbudget (' + (rest >= 0 ? 'noch ' + money0(rest) : '<b class="badtxt">' + money0(-rest) + ' drüber</b>') + ')'); } }
-      if (noneC.length) parts.push(sum(noneC) + ' ohne Budget' + (noneC.length <= 2 ? ' (' + esc(noneC.map(c => c.name).join(', ')) + ')' : ''));
-    }
+    /* Kurz: Ausgaben in Kategorien mit Monatsbudget gegen das Monatsbudget; was nicht mitzählt (Jahresbudget, ohne Budget), steht in Klammern */
+    const left = tb - bsAll, out = [];
+    if (!S.profile.totalBudget) { const sp = spentByCat(list); for (const c of cats()) if (c.kind === 'expense' && !c.saving && !S.profile.budgets[c.id] && sp[c.id] > 0) out.push(c.name); }
+    const parts = [money0(bsAll) + ' von ' + money0(tb) + ' Budget' + (out.length ? ' (ohne ' + esc(out.length <= 2 ? out.join(', ') : out.length + ' Kategorien') + ')' : ''),
+      left >= 0 ? 'noch ' + money0(left) : '<b class="badtxt">' + money0(-left) + ' drüber</b>'];
     if (isCur) parts.push((dim(k) - daysGone) + ' Tage übrig');
     h += '<p class="note hero-foot">' + parts.join(' · ') + '</p>';
   }

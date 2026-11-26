@@ -704,7 +704,7 @@ async function addEntry({amount, merchant, cat, card}){
       es.put({id:'h1', type:'expense', amount:25000, catId:'lebensmittel', date:d, merchant:'Markt'}); es.put({id:'h2', type:'expense', amount:4000, catId:'freizeit', date:d, merchant:'Kino'});
       es.put({id:'h3', type:'expense', amount:1500, catId:'sonstiges', date:d, merchant:'Allerlei'}); }`);
     await go('uebersicht'); const t = (await page.innerText('.hero-foot')).replace(/\s+/g, ' ');
-    ok(/Monatsbudget € ?200/.test(t) && /ausgegeben € ?250,00/.test(t) && /€ ?50,00 drüber/.test(t) && /Freizeit € ?40,00 aus Jahresbudget \(noch € ?960\)/.test(t) && /€ ?15,00 ohne Budget/.test(t), t);
+    ok(/^€ ?250 von € ?200 Budget \(ohne Freizeit, Sonstiges\) · € ?50 drüber/.test(t), t);
   });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));
