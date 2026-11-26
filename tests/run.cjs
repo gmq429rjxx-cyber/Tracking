@@ -619,8 +619,12 @@ async function addEntry({amount, merchant, cat, card}){
   });
   await test('KI-Assistent: fragt Daten über Werkzeuge ab, schickt keine Notizen/Personen/Karten, zeigt was abgerufen wurde', async () => {
     await fresh();
-    ok(await page.isHidden('#aiBtn'), 'Knopf ohne API-Key sichtbar');
-    await page.click('[data-act="settings"]'); await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
+    ok(await page.isVisible('#aiBtn'), 'Knopf ohne API-Key nicht sichtbar');
+    await page.click('#aiBtn'); await page.waitForTimeout(300);
+    ok(/API-Key/.test(await page.innerText('#sheetBody')) && !(await page.$('#chatIn')), 'ohne Key kein Hinweis');
+    await page.click('#sheetBody [data-act="settings"]'); await page.waitForTimeout(400);
+    ok(await page.isVisible('#s-key-in'), 'Einstellungen nicht geöffnet');
+    await page.fill('#s-key-in', 'sk-ant-api03-' + 'T'.repeat(40)); await page.click('#s-key button[type=submit]'); await page.waitForTimeout(300);
     await seed(`(p, es) => { p.cards.push({id:'kk', name:'Testkarte', last4:'4321'}); p.persons = [{id:'px', name:'Testperson'}];
       es.put({id:'q1', type:'expense', amount:5000, catId:'lebensmittel', date:'${today()}', merchant:'Markt', note:'GEHEIM-NOTIZ', cardId:'kk', persons:['px']});
       es.put({id:'q2', type:'expense', amount:1200, catId:'freizeit', date:'${today()}', merchant:'Kino', note:'GEHEIM-NOTIZ'}); }`);

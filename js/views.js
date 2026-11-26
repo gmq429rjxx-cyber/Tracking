@@ -2,7 +2,7 @@
 'use strict';
 /* ---------- rendering ---------- */
 function render(){
-  const ml = $('#modeLine'), ab = $('#aiBtn'); if (ab) ab.hidden = !SET.apiKey;
+  const ml = $('#modeLine');
   ml.textContent = S.mode === 'local' ? 'Nur auf diesem Gerät' : S.mode === 'error' ? 'Kein Speicher' : 'Wird geladen …';
   const b = [];
   if (S.banner) b.push('<div class="banner"><b>Hinweis</b><span>' + esc(S.banner) + '</span></div>');

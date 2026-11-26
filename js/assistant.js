@@ -144,6 +144,11 @@ function aiFormat(t){
 }
 const AI_SUGG = ['Wie viel haben wir diesen Monat gespart?', 'Wo könnten wir einsparen?', 'Welche Abos zahlen wir, und was kosten sie im Jahr?'];
 function openAssistant(){
+  /* ohne API-Key: Knopf bleibt sichtbar, erklärt aber zuerst, was fehlt */
+  if (!SET.apiKey) {
+    openSheet('Fragen', '<p class="note" style="margin:0">Für den Assistenten braucht die App deinen Claude-API-Key, wie beim Beleg-Scan. Hinterlege ihn in den Einstellungen unter „KI-Belegscan“.</p><button class="btn primary" data-act="settings">Zu den Einstellungen</button>');
+    return;
+  }
   const bubble = m => m.role === 'user' ? '<div class="msg me">' + esc(m.text) + '</div>' : '<div class="msg ai">' + aiFormat(m.text) + (m.used && m.used.length ? '<div class="msg-src">Abgerufen: ' + esc([...new Set(m.used)].join(' · ')) + '</div>' : '') + '</div>';
   const shown = aiLog;
   openSheet('Fragen', '<div class="chat" id="chatLog">' + shown.map(bubble).join('') + '</div>' +
