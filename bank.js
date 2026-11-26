@@ -5,7 +5,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', imp
 
 /** Textzeilen einer PDF, Spalten durch " | " getrennt. */
 export async function pdfLines(buffer){
-  const doc = await pdfjs.getDocument({data:new Uint8Array(buffer), isEvalSupported:false, disableFontFace:true}).promise;
+  const task = pdfjs.getDocument({data:new Uint8Array(buffer), isEvalSupported:false, disableFontFace:true}), doc = await task.promise;
   const out = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const tc = await (await doc.getPage(i)).getTextContent();
@@ -21,7 +21,7 @@ export async function pdfLines(buffer){
       out.push(s.replace(/\s+/g, ' ').trim());
     }
   }
-  await doc.destroy();
+  await task.destroy();
   return out;
 }
 
@@ -56,23 +56,25 @@ const titleCase = s => s.toLowerCase().replace(/(^|[\s\-/.&])([a-zäöüß])/g, 
 /** Bild-PDF (z. B. ganzseitiger iOS-Screenshot eines App-Belegs): das größte Bild jeder Seite als Pixeldaten.
     null, wenn die PDF echten Text hat – dann liest die KI sie direkt. */
 export async function pdfImages(buffer){
-  const doc = await pdfjs.getDocument({data:new Uint8Array(buffer), isEvalSupported:false, disableFontFace:true, isOffscreenCanvasSupported:false}).promise;
-  const out = [];
-  for (let i = 1; i <= Math.min(doc.numPages, 10); i++) {
-    const page = await doc.getPage(i);
-    const tc = await page.getTextContent();
-    if (tc.items.filter(t => t.str && t.str.trim()).length > 15) return null;
-    const ops = await page.getOperatorList();
-    let best = null;
-    for (let k = 0; k < ops.fnArray.length; k++) {
-      if (ops.fnArray[k] !== pdfjs.OPS.paintImageXObject) continue;
-      const id = ops.argsArray[k][0];
-      const img = await new Promise(res => (String(id).startsWith('g_') ? page.commonObjs : page.objs).get(id, res));
-      if (img && img.data && [1, 2, 3].includes(img.kind) && (!best || img.width * img.height > best.width * best.height)) best = img;
+  const task = pdfjs.getDocument({data:new Uint8Array(buffer), isEvalSupported:false, disableFontFace:true, isOffscreenCanvasSupported:false}), doc = await task.promise;
+  try {
+    const out = [];
+    for (let i = 1; i <= Math.min(doc.numPages, 10); i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      if (tc.items.filter(t => t.str && t.str.trim()).length > 15) return null;
+      const ops = await page.getOperatorList();
+      let best = null;
+      for (let k = 0; k < ops.fnArray.length; k++) {
+        if (ops.fnArray[k] !== pdfjs.OPS.paintImageXObject) continue;
+        const id = ops.argsArray[k][0];
+        const img = await new Promise(res => (String(id).startsWith('g_') ? page.commonObjs : page.objs).get(id, res));
+        if (img && img.data && [1, 2, 3].includes(img.kind) && (!best || img.width * img.height > best.width * best.height)) best = img;
+      }
+      if (best && best.width >= 200 && best.height >= 200) out.push({width:best.width, height:best.height, kind:best.kind, data:best.data});
     }
-    if (best && best.width >= 200 && best.height >= 200) out.push({width:best.width, height:best.height, kind:best.kind, data:best.data});
-  }
-  return out.length ? out : null;
+    return out.length ? out : null;
+  } finally { task.destroy(); }
 }
 
 /** Bank-Buchungstext lesbar und sparsam machen: BIC weg, bei Daueraufträgen nur „Dauerauftrag <Zweck>“ statt Name des Auftraggebers.
