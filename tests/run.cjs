@@ -273,7 +273,7 @@ async function addEntry({amount, merchant, cat, card}){
     await page.click('#f-extra summary'); await page.selectOption('#f-tax', 'wk'); await page.click('#f-save'); await page.waitForTimeout(400);
     await seed(`(p, es) => { const x = new Date(); x.setDate(x.getDate() + 30); es.put({id:'w', type:'expense', amount:39900, catId:'sonstiges', date:'2024-12-01', merchant:'Elektrohandel', note:'Staubsauger', warrantyUntil:x.toISOString().slice(0, 10)}); const y = new Date(); y.setDate(y.getDate() + 200); es.put({id:'w2', type:'expense', amount:9900, catId:'sonstiges', date:'2026-01-01', merchant:'Fernsehladen', warrantyUntil:y.toISOString().slice(0, 10)}); }`);
     await go('uebersicht'); { const v = await page.innerText('#view'); ok(/Garantie endet: Elektrohandel/.test(v), 'Garantie-Hinweis fehlt'); ok(!/Garantie endet: Fernsehladen/.test(v), 'Hinweis zu früh'); }
-    await go('statistik'); await page.click('[data-act="taxlist"]'); await page.waitForTimeout(300); ok(/Werbungskosten/.test(await page.innerText('#sheetBody')) && /Fachbuchhandlung/.test(await page.innerText('#sheetBody')), 'Steuerliste');
+    await go('statistik'); await page.click('[data-act="taxlist"]'); for (let i = 0; i < 20 && !/Fachbuchhandlung/.test(await page.innerText('#sheetBody')); i++) await page.waitForTimeout(150); ok(/Werbungskosten/.test(await page.innerText('#sheetBody')) && /Fachbuchhandlung/.test(await page.innerText('#sheetBody')), 'Steuerliste');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#tx-csv')]); const f = path.join(require('os').tmpdir(), 'kb-tax.csv'); await dl.saveAs(f);
     ok(/Fachbuchhandlung/.test(fs.readFileSync(f, 'utf8')), 'CSV'); await closeSheet();
     await page.click('[data-act="warranties"]'); await page.waitForTimeout(300); ok(/Staubsauger/.test(await page.innerText('#sheetBody')), 'Garantieliste');
@@ -709,6 +709,15 @@ async function addEntry({amount, merchant, cat, card}){
       es.put({id:'h3', type:'expense', amount:1500, catId:'sonstiges', date:d, merchant:'Allerlei'}); }`);
     await go('uebersicht'); const t = (await page.innerText('.hero-foot')).replace(/\s+/g, ' ');
     ok(/^€ ?250 von € ?200 Budget \(ohne Freizeit, Sonstiges\) · € ?50 drüber/.test(t), t);
+  });
+  await test('Kategorien alphabetisch: Auswahl, Filter und Einstellungen; Gruppen-Reihenfolge bleibt', async () => {
+    await fresh();
+    await seed(`(p, es) => { p.categories = p.categories.filter(c => c.kind !== 'expense').concat([{id:'z1', name:'Zahnarzt', kind:'expense', group:'B-Gruppe', color:1}, {id:'a1', name:'Äpfel', kind:'expense', group:'B-Gruppe', color:2}, {id:'m1', name:'mode', kind:'expense', group:'A-Gruppe', color:3}, {id:'b1', name:'Bücher', kind:'expense', group:'A-Gruppe', color:4}]); p.groups = ['B-Gruppe', 'A-Gruppe']; p.budgets = {z1:1000, a1:1000, m1:1000, b1:1000}; }`);
+    const r = await page.evaluate(() => ({cats:cats().filter(c => c.kind === 'expense').map(c => c.name).join(), opt:[...new DOMParser().parseFromString('<select>' + catOptions('expense', 'z1') + '</select>', 'text/html').querySelectorAll('option')].map(o => o.textContent).filter(Boolean).join()}));
+    ok(r.cats === 'Äpfel,Bücher,mode,Zahnarzt', 'cats(): ' + r.cats);
+    ok(/Äpfel.*Bücher.*mode.*Zahnarzt/.test(r.opt), 'Auswahl: ' + r.opt);
+    await go('budgets'); const t = (await page.innerText('#view')).replace(/\s+/g, ' ');
+    ok(t.indexOf('B-Gruppe') < t.indexOf('A-Gruppe') && t.indexOf('Äpfel') < t.indexOf('Zahnarzt') && t.indexOf('Bücher') < t.indexOf('mode'), 'Budgets: ' + t.slice(0, 300));
   });
   await test('Netzwerk: nur eigene Dateien und api.anthropic.com', async () => {
     await fresh(); const hosts = new Set(); page.on('request', q => hosts.add(new URL(q.url()).host));

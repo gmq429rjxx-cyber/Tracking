@@ -1,6 +1,6 @@
 // Kassabuch – Hilfsfunktionen, Datenmodell, Speicher (IndexedDB), Beispieldaten
 'use strict';
-const APP_VERSION = '2026.11.26-3';
+const APP_VERSION = '2026.11.27-1';
 
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -125,8 +125,15 @@ const S = {
 let idb = null;
 const SET = {apiKey:'', model:'claude-haiku-5-5', lastBackup:null};
 
-const cats = () => S.profile.categories;
-const catById = id => cats().find(c => c.id === id) || {id, name:'Ohne Kategorie', color:7, kind:'expense'};
+/* Kategorien überall alphabetisch (deutsch: Umlaute richtig, Groß/klein egal); die Reihenfolge der Gruppen bleibt die des Plans */
+const CAT_COLL = new Intl.Collator('de', {sensitivity:'base', numeric:true});
+let catsSrc = null, catsKey = '', catsSorted = [];
+const cats = () => {
+  const a = S.profile.categories, key = a.length + '|' + a.map(c => c.name).join('|');
+  if (a !== catsSrc || key !== catsKey) { catsSrc = a; catsKey = key; catsSorted = a.slice().sort((x, y) => CAT_COLL.compare(x.name || '', y.name || '')); }
+  return catsSorted;
+};
+const catById = id => S.profile.categories.find(c => c.id === id) || {id, name:'Ohne Kategorie', color:7, kind:'expense'};
 const cardById = id => S.profile.cards.find(c => c.id === id);
 const allEntries = () => [...S.entries.values()];
 const entriesIn = prefix => allEntries().filter(e => typeof e.date === 'string' && e.date.startsWith(prefix));
